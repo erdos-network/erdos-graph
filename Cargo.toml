@@ -1,0 +1,9 @@
+[package]
+name = "erdos-graph"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+indradb-lib = "5.0"
+rand = "0.9.2"
+uuid = { version = "1.18.1", features = ["v4"] }
