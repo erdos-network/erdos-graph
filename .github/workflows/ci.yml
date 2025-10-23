@@ -109,13 +109,6 @@ jobs:
     - name: Check coverage threshold (fail if < 80%)
       run: cargo llvm-cov --all-features --workspace --fail-under-lines 80
     
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        files: lcov.info
-        fail_ci_if_error: true
-        token: ${{ secrets.CODECOV_TOKEN }}
-    
     - name: Generate HTML coverage report
       run: cargo llvm-cov --all-features --workspace --html
     
