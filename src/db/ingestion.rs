@@ -1,6 +1,7 @@
 use indradb::Datastore;
 use uuid::Uuid;
 
+#[coverage(off)]
 pub fn find_or_create_person(
     _datastore: &mut impl Datastore,
     _name: &str,
@@ -9,6 +10,7 @@ pub fn find_or_create_person(
     Ok(Uuid::new_v4())
 }
 
+#[coverage(off)]
 pub fn ingest_publication(
     _datastore: &mut impl Datastore,
     _title: &str,
