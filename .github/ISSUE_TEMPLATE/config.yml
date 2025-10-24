@@ -1,0 +1,7 @@
+# Issue template configuration
+# Available templates: Bug Report, Feature Request, Documentation
+blank_issues_enabled: true
+contact_links:
+  - name: Question or Discussion
+    url: https://github.com/erdos-network/erdos-graph/discussions
+    about: Ask questions or discuss ideas in GitHub Discussions
