@@ -1,6 +1,6 @@
 
 <div align="center">
-  <img src="assets/Erdos_Graph_Banner.png" alt="Erdos Graph Banner" width="100%">
+  <img src="assets/banner.png" alt="Erdos Graph Banner" width="100%">
   
   ![CI](https://github.com/erdos-network/erdos-graph/actions/workflows/ci.yml/badge.svg)
   [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
