@@ -132,3 +132,34 @@ jobs:
     
     - name: Check formatting
       run: cargo fmt --all --check
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+    # Docs don't require nightly; use stable for faster downloads
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build documentation
+      run: cargo doc --workspace --all-features --no-deps
+
+    - name: Upload docs artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-docs
+        path: target/doc/
