@@ -4,8 +4,8 @@ mod tests {
         PublicationRecord, check_conflict, find_or_create_person, get_checkpoint,
         ingest_publication, mark_ingested, set_checkpoint,
     };
-    use chrono::{Duration, Utc};
-    use indradb::MemoryDatastore;
+    use chrono::Utc;
+    use indradb::{Database, MemoryDatastore};
     use std::fs;
 
     /// Test basic publication record creation.
@@ -28,18 +28,18 @@ mod tests {
     #[test]
     #[ignore = "Person lookup not yet implemented"]
     fn test_find_or_create_person() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
 
         let result1 = find_or_create_person(&mut datastore, "Alice");
         assert!(result1.is_ok());
 
-        let uuid1 = result1.unwrap();
+        let _uuid1 = result1.unwrap();
 
         // Second call with same name should return same UUID
         let result2 = find_or_create_person(&mut datastore, "Alice");
         assert!(result2.is_ok());
 
-        let uuid2 = result2.unwrap();
+        let _uuid2 = result2.unwrap();
 
         // TODO: Once implemented, verify:
         // assert_eq!(uuid1, uuid2);
@@ -49,7 +49,7 @@ mod tests {
     #[test]
     #[ignore = "Conflict detection not yet implemented"]
     fn test_check_conflict() {
-        let datastore = MemoryDatastore::default();
+        let datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
 
         let record = PublicationRecord {
             id: "arxiv:2024.12345".to_string(),
@@ -73,7 +73,7 @@ mod tests {
     #[test]
     #[ignore = "Ingestion not yet implemented"]
     fn test_ingest_publication() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
 
         let record = PublicationRecord {
             id: "dblp:conf/icml/SmithJ24".to_string(),
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     #[ignore = "Ingestion not yet implemented"]
     fn test_ingest_duplicate_publication() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
 
         let record = PublicationRecord {
             id: "test:456".to_string(),
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     #[ignore = "Mark ingested not yet implemented"]
     fn test_mark_ingested() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
 
         let record = PublicationRecord {
             id: "test:789".to_string(),
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     #[ignore = "Ingestion not yet implemented"]
     fn test_ingest_no_authors() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
 
         let record = PublicationRecord {
             id: "test:999".to_string(),

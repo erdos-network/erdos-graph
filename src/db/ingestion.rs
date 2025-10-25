@@ -4,7 +4,7 @@
 //! including conflict detection, person lookup/creation, and checkpointing.
 
 use chrono::{DateTime, Utc};
-use indradb::Datastore;
+use indradb::{Database, Datastore};
 use std::fs;
 use std::path::Path;
 use uuid::Uuid;
@@ -26,7 +26,7 @@ use uuid::Uuid;
 /// The UUID of the found or newly created Person vertex
 #[coverage(off)]
 pub fn find_or_create_person(
-    _datastore: &mut impl Datastore,
+    _datastore: &mut Database<impl Datastore>,
     _name: &str,
 ) -> Result<Uuid, indradb::Error> {
     // TODO: Implement person lookup with name normalization
@@ -70,7 +70,7 @@ pub struct PublicationRecord {
 /// `true` if the publication already exists, `false` otherwise
 #[coverage(off)]
 pub fn check_conflict(
-    _datastore: &impl Datastore,
+    _datastore: &Database<impl Datastore>,
     _record: &PublicationRecord,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     // TODO: Hash the publication record
@@ -92,7 +92,7 @@ pub fn check_conflict(
 /// * `record` - The publication record that was ingested
 #[coverage(off)]
 pub fn mark_ingested(
-    _datastore: &mut impl Datastore,
+    _datastore: &mut Database<impl Datastore>,
     _record: &PublicationRecord,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Log successful ingestion
@@ -156,7 +156,7 @@ pub fn set_checkpoint(source: &str, date: DateTime<Utc>) -> Result<(), Box<dyn s
 /// `Ok(())` on success, or an error if database operations fail
 #[coverage(off)]
 pub fn ingest_publication(
-    datastore: &mut impl Datastore,
+    datastore: &mut Database<impl Datastore>,
     record: PublicationRecord,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this publication already exists

@@ -2,13 +2,13 @@
 mod tests {
     use crate::scrapers::scraping_orchestrator::{run_chunk, run_scrape};
     use chrono::{Duration, Utc};
-    use indradb::MemoryDatastore;
+    use indradb::{Database, MemoryDatastore};
 
     /// Test the complete scraping orchestration in "initial" mode.
     #[test]
     #[ignore = "Orchestrator integration test - scrapers not yet implemented"]
     fn test_run_scrape_initial_mode() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let chunk_size = Duration::days(7);
 
         let result = run_scrape(
@@ -32,7 +32,7 @@ mod tests {
     #[test]
     #[ignore = "Orchestrator integration test - scrapers not yet implemented"]
     fn test_run_scrape_weekly_mode() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let chunk_size = Duration::days(1);
 
         // TODO: Set up a checkpoint file first
@@ -55,7 +55,7 @@ mod tests {
     #[test]
     #[ignore = "Orchestrator integration test - scrapers not yet implemented"]
     fn test_run_scrape_invalid_mode() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let chunk_size = Duration::days(7);
 
         let result = run_scrape("invalid_mode", None, None, chunk_size, None, &mut datastore);
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     #[ignore = "Chunk processing test - scrapers not yet implemented"]
     fn test_run_chunk_arxiv() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let start = Utc::now() - Duration::days(7);
         let end = Utc::now();
 
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     #[ignore = "Chunk processing test - scrapers not yet implemented"]
     fn test_run_chunk_unknown_source() {
-        let mut datastore = MemoryDatastore::default();
+        let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let start = Utc::now() - Duration::days(7);
         let end = Utc::now();
 

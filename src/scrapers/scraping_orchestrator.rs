@@ -7,7 +7,7 @@ use crate::db::ingestion::{get_checkpoint, ingest_publication, set_checkpoint};
 use crate::scrapers::{arxiv, dblp, zbmath};
 use crate::utilities::generate_chunks;
 use chrono::{DateTime, Duration, Utc};
-use indradb::Datastore;
+use indradb::{Database, Datastore};
 
 /// Orchestrates the complete scraping process for one or more publication sources.
 ///
@@ -40,7 +40,7 @@ pub fn run_scrape(
     end_date: Option<DateTime<Utc>>,
     chunk_size: Duration,
     source: Option<&str>,
-    datastore: &mut impl Datastore,
+    datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Determine which sources to scrape (specific source or all)
     let sources = source
@@ -95,7 +95,7 @@ pub fn run_chunk(
     source: &str,
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    datastore: &mut impl Datastore,
+    datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Dispatch to the appropriate scraper
     let records = match source {
