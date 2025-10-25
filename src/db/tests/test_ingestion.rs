@@ -64,7 +64,7 @@ mod tests {
         assert!(result.is_ok());
 
         // First time should be no conflict
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
 
         // TODO: After ingesting, check again and expect true
     }
