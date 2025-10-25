@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 ///
 /// # Implementation Notes
 /// This function should:
-/// - Query the zbMATH Open API (https://api.zbmath.org/)
+/// - Query the zbMATH Open API (<https://api.zbmath.org/>)
 /// - Filter results by publication date within the specified range
 /// - Parse JSON responses into `PublicationRecord` structs
 /// - Extract mathematics-specific metadata (MSC codes, reviews, etc.)
