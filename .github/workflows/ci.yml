@@ -137,8 +137,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Build documentation
         run: cargo doc --workspace --all-features --no-deps
+      - name: Build documentation
+        run: cargo doc --workspace --all-features --no-deps
+      - name: Add redirect index.html
+        run: echo '<meta http-equiv="refresh" content="0; url=erdos_graph/index.html">' > target/doc/index.html
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./target/doc/erdos_graph
+          publish_dir: ./target/doc/
