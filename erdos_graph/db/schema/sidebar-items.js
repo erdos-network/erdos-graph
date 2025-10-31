@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AUTHORED_TYPE","COAUTHORED_WITH_TYPE","PERSON_TYPE","PUBLICATION_TYPE"],"fn":["coauthored_with_properties","create_types","person_properties","publication_properties"]};

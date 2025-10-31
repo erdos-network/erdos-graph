@@ -1,0 +1,2 @@
+createSrcSidebar('[["erdos_graph",["",[["db",[],["client.rs","ingestion.rs","mod.rs","schema.rs"]],["scrapers",[],["arxiv.rs","dblp.rs","mod.rs","scraping_orchestrator.rs","zbmath.rs"]]],["lib.rs","utilities.rs"]]]]');
+//{"start":19,"fragment_lengths":[195]}
