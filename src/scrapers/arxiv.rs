@@ -2,8 +2,8 @@ use crate::db::ingestion::PublicationRecord;
 use chrono::{DateTime, Datelike, Utc};
 use quick_xml::Reader;
 // quick-xml unescape helper removed: we rely on read_text for decoding
-use quick_xml::events::Event;
 use quick_xml::escape::unescape as quick_unescape;
+use quick_xml::events::Event;
 // streaming/channel parsing removed; we'll use sliding-window per-entry parsing
 use reqwest::Client;
 // streaming/channel parsing removed; keep imports minimal
@@ -39,7 +39,9 @@ pub(crate) fn parse_entries_from_chunks(
     use quick_xml::events::Event;
 
     fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
-        if needle.is_empty() || hay.len() < needle.len() { return None; }
+        if needle.is_empty() || hay.len() < needle.len() {
+            return None;
+        }
         hay.windows(needle.len()).position(|w| w == needle)
     }
 
@@ -51,7 +53,9 @@ pub(crate) fn parse_entries_from_chunks(
 
         loop {
             let start_opt = find_subslice(&buf_acc, b"<entry");
-            if start_opt.is_none() { break; }
+            if start_opt.is_none() {
+                break;
+            }
             let start = start_opt.unwrap();
             if let Some(rel_end) = find_subslice(&buf_acc[start..], b"</entry>") {
                 let end = start + rel_end + b"</entry>".len();
@@ -74,21 +78,94 @@ pub(crate) fn parse_entries_from_chunks(
                             let name = e.local_name();
                             match name.as_ref() {
                                 b"entry" | b"{http://www.w3.org/2005/Atom}entry" => {}
-                                b"id" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_id = Some(cow.into_owned().trim().to_string()) } else { cur_id = Some(txt.trim().to_string()) } },
-                                b"title" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_title = Some(cow.into_owned().trim().to_string()) } else { cur_title = Some(txt.trim().to_string()) } },
-                                b"published" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_published = Some(cow.into_owned().trim().to_string()) } else { cur_published = Some(txt.trim().to_string()) } },
-                                b"journal_ref" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_journal_ref = Some(cow.into_owned().trim().to_string()) } else { cur_journal_ref = Some(txt.trim().to_string()) } },
-                                b"name" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_authors.push(cow.into_owned().trim().to_string()) } else { cur_authors.push(txt.trim().to_string()) } },
-                                b"arxiv:primary_category" | b"primary_category" => for attr in e.attributes().with_checks(false) { if let Ok(att) = attr { if att.key.as_ref() == b"term" { let val = String::from_utf8_lossy(att.value.as_ref()).to_string(); cur_primary_cat = Some(val); } } },
+                                b"id" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_id = Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_id = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"title" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_title = Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_title = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"published" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_published =
+                                                Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_published = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"journal_ref" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_journal_ref =
+                                                Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_journal_ref = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"name" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_authors.push(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_authors.push(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"arxiv:primary_category" | b"primary_category" => {
+                                    for attr in e.attributes().with_checks(false) {
+                                        if let Ok(att) = attr {
+                                            if att.key.as_ref() == b"term" {
+                                                let val =
+                                                    String::from_utf8_lossy(att.value.as_ref())
+                                                        .to_string();
+                                                cur_primary_cat = Some(val);
+                                            }
+                                        }
+                                    }
+                                }
                                 _ => {}
                             }
                         }
                         Ok(Event::End(ref e)) => {
                             if e.local_name().as_ref() == b"entry" {
-                                let include = if let Some(pubdate) = &cur_published { if let Ok(dt) = DateTime::parse_from_rfc3339(pubdate) { let dt_utc = dt.with_timezone(&Utc); dt_utc >= start_date && dt_utc < end_date } else { false } } else { false };
+                                let include = if let Some(pubdate) = &cur_published {
+                                    if let Ok(dt) = DateTime::parse_from_rfc3339(pubdate) {
+                                        let dt_utc = dt.with_timezone(&Utc);
+                                        dt_utc >= start_date && dt_utc < end_date
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
                                 if include {
-                                    let year = cur_published.as_ref().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.year() as u32).unwrap_or(0);
-                                    results.push(PublicationRecord { id: cur_id.take().unwrap_or_default(), title: cur_title.take().unwrap_or_default(), authors: cur_authors.clone(), year, venue: cur_journal_ref.take().or(cur_primary_cat.take()), source: String::from("arxiv"), });
+                                    let year = cur_published
+                                        .as_ref()
+                                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                                        .map(|d| d.year() as u32)
+                                        .unwrap_or(0);
+                                    results.push(PublicationRecord {
+                                        id: cur_id.take().unwrap_or_default(),
+                                        title: cur_title.take().unwrap_or_default(),
+                                        authors: cur_authors.clone(),
+                                        year,
+                                        venue: cur_journal_ref.take().or(cur_primary_cat.take()),
+                                        source: String::from("arxiv"),
+                                    });
                                 }
                                 break;
                             }
@@ -101,7 +178,9 @@ pub(crate) fn parse_entries_from_chunks(
 
                 buf_acc.drain(0..end);
                 continue;
-            } else { break; }
+            } else {
+                break;
+            }
         }
     }
 
@@ -110,12 +189,14 @@ pub(crate) fn parse_entries_from_chunks(
 impl Default for ArxivConfig {
     fn default() -> Self {
         fn env_usize(name: &str, default: usize) -> usize {
-            std::env::var(name).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
+            std::env::var(name)
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(default)
         }
 
-        let base = std::env::var("ARXIV_API_BASE").unwrap_or_else(|_| {
-            "http://export.arxiv.org/api/query".to_string()
-        });
+        let base = std::env::var("ARXIV_API_BASE")
+            .unwrap_or_else(|_| "http://export.arxiv.org/api/query".to_string());
         ArxivConfig {
             base_url: base,
             page_size: env_usize("ARXIV_PAGE_SIZE", 100),
@@ -158,13 +239,15 @@ pub async fn scrape_range_with_config_async(
 
         // Sliding-window streaming parser: accumulate chunks and extract <entry> slices
         let mut resp = client.get(&url).send().await?;
-    // remember how many results we had before this page so we can decide
-    // when to stop (arXiv returns fewer than page_size when exhausted)
-    let prev_results_len = results.len();
+        // remember how many results we had before this page so we can decide
+        // when to stop (arXiv returns fewer than page_size when exhausted)
+        let prev_results_len = results.len();
         let mut buf_acc: Vec<u8> = Vec::new();
 
         fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
-            if needle.is_empty() || hay.len() < needle.len() { return None; }
+            if needle.is_empty() || hay.len() < needle.len() {
+                return None;
+            }
             hay.windows(needle.len()).position(|w| w == needle)
         }
 
@@ -177,7 +260,9 @@ pub async fn scrape_range_with_config_async(
             // extract complete entries
             loop {
                 let start_opt = find_subslice(&buf_acc, b"<entry");
-                if start_opt.is_none() { break; }
+                if start_opt.is_none() {
+                    break;
+                }
                 let start = start_opt.unwrap();
                 if let Some(rel_end) = find_subslice(&buf_acc[start..], b"</entry>") {
                     let end = start + rel_end + b"</entry>".len();
@@ -201,22 +286,106 @@ pub async fn scrape_range_with_config_async(
                             Ok(Event::Start(ref e)) => {
                                 let name = e.local_name();
                                 match name.as_ref() {
-                                    b"entry" | b"{http://www.w3.org/2005/Atom}entry" => inside_entry = true,
-                                    b"id" if inside_entry => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_id = Some(cow.into_owned().trim().to_string()) } else { cur_id = Some(txt.trim().to_string()) } },
-                                    b"title" if inside_entry => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_title = Some(cow.into_owned().trim().to_string()) } else { cur_title = Some(txt.trim().to_string()) } },
-                                    b"published" if inside_entry => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_published = Some(cow.into_owned().trim().to_string()) } else { cur_published = Some(txt.trim().to_string()) } },
-                                    b"journal_ref" if inside_entry => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_journal_ref = Some(cow.into_owned().trim().to_string()) } else { cur_journal_ref = Some(txt.trim().to_string()) } },
-                                    b"name" if inside_entry => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_authors.push(cow.into_owned().trim().to_string()) } else { cur_authors.push(txt.trim().to_string()) } },
-                                    b"arxiv:primary_category" | b"primary_category" if inside_entry => for attr in e.attributes().with_checks(false) { if let Ok(att) = attr { if att.key.as_ref() == b"term" { let val = String::from_utf8_lossy(att.value.as_ref()).to_string(); cur_primary_cat = Some(val); } } },
+                                    b"entry" | b"{http://www.w3.org/2005/Atom}entry" => {
+                                        inside_entry = true
+                                    }
+                                    b"id" if inside_entry => {
+                                        if let Ok(txt) = reader.read_text(e.name()) {
+                                            if let Ok(cow) = quick_unescape(&txt) {
+                                                cur_id = Some(cow.into_owned().trim().to_string())
+                                            } else {
+                                                cur_id = Some(txt.trim().to_string())
+                                            }
+                                        }
+                                    }
+                                    b"title" if inside_entry => {
+                                        if let Ok(txt) = reader.read_text(e.name()) {
+                                            if let Ok(cow) = quick_unescape(&txt) {
+                                                cur_title =
+                                                    Some(cow.into_owned().trim().to_string())
+                                            } else {
+                                                cur_title = Some(txt.trim().to_string())
+                                            }
+                                        }
+                                    }
+                                    b"published" if inside_entry => {
+                                        if let Ok(txt) = reader.read_text(e.name()) {
+                                            if let Ok(cow) = quick_unescape(&txt) {
+                                                cur_published =
+                                                    Some(cow.into_owned().trim().to_string())
+                                            } else {
+                                                cur_published = Some(txt.trim().to_string())
+                                            }
+                                        }
+                                    }
+                                    b"journal_ref" if inside_entry => {
+                                        if let Ok(txt) = reader.read_text(e.name()) {
+                                            if let Ok(cow) = quick_unescape(&txt) {
+                                                cur_journal_ref =
+                                                    Some(cow.into_owned().trim().to_string())
+                                            } else {
+                                                cur_journal_ref = Some(txt.trim().to_string())
+                                            }
+                                        }
+                                    }
+                                    b"name" if inside_entry => {
+                                        if let Ok(txt) = reader.read_text(e.name()) {
+                                            if let Ok(cow) = quick_unescape(&txt) {
+                                                cur_authors
+                                                    .push(cow.into_owned().trim().to_string())
+                                            } else {
+                                                cur_authors.push(txt.trim().to_string())
+                                            }
+                                        }
+                                    }
+                                    b"arxiv:primary_category" | b"primary_category"
+                                        if inside_entry =>
+                                    {
+                                        for attr in e.attributes().with_checks(false) {
+                                            if let Ok(att) = attr {
+                                                if att.key.as_ref() == b"term" {
+                                                    let val =
+                                                        String::from_utf8_lossy(att.value.as_ref())
+                                                            .to_string();
+                                                    cur_primary_cat = Some(val);
+                                                }
+                                            }
+                                        }
+                                    }
                                     _ => {}
                                 }
                             }
                             Ok(Event::End(ref e)) => {
-                                if e.local_name().as_ref() == b"entry" || e.local_name().as_ref() == b"{http://www.w3.org/2005/Atom}entry" {
-                                    let include = if let Some(pubdate) = &cur_published { if let Ok(dt) = DateTime::parse_from_rfc3339(pubdate) { let dt_utc = dt.with_timezone(&Utc); dt_utc >= start_date && dt_utc < end_date } else { false } } else { false };
+                                if e.local_name().as_ref() == b"entry"
+                                    || e.local_name().as_ref()
+                                        == b"{http://www.w3.org/2005/Atom}entry"
+                                {
+                                    let include = if let Some(pubdate) = &cur_published {
+                                        if let Ok(dt) = DateTime::parse_from_rfc3339(pubdate) {
+                                            let dt_utc = dt.with_timezone(&Utc);
+                                            dt_utc >= start_date && dt_utc < end_date
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
                                     if include {
-                                        let year = cur_published.as_ref().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.year() as u32).unwrap_or(0);
-                                        results.push(PublicationRecord { id: cur_id.take().unwrap_or_default(), title: cur_title.take().unwrap_or_default(), authors: cur_authors.clone(), year, venue: cur_journal_ref.take().or(cur_primary_cat.take()), source: String::from("arxiv"), });
+                                        let year = cur_published
+                                            .as_ref()
+                                            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                                            .map(|d| d.year() as u32)
+                                            .unwrap_or(0);
+                                        results.push(PublicationRecord {
+                                            id: cur_id.take().unwrap_or_default(),
+                                            title: cur_title.take().unwrap_or_default(),
+                                            authors: cur_authors.clone(),
+                                            year,
+                                            venue: cur_journal_ref
+                                                .take()
+                                                .or(cur_primary_cat.take()),
+                                            source: String::from("arxiv"),
+                                        });
                                     }
                                     break;
                                 }
@@ -230,14 +399,18 @@ pub async fn scrape_range_with_config_async(
                     // drain consumed bytes and continue extracting others
                     buf_acc.drain(0..end);
                     continue;
-                } else { break; }
+                } else {
+                    break;
+                }
             }
         }
 
         // process any remaining complete entries after EOF
         loop {
             let start_opt = find_subslice(&buf_acc, b"<entry");
-            if start_opt.is_none() { break; }
+            if start_opt.is_none() {
+                break;
+            }
             let start = start_opt.unwrap();
             if let Some(rel_end) = find_subslice(&buf_acc[start..], b"</entry>") {
                 let end = start + rel_end + b"</entry>".len();
@@ -259,16 +432,98 @@ pub async fn scrape_range_with_config_async(
                             let name = e.local_name();
                             match name.as_ref() {
                                 b"entry" | b"{http://www.w3.org/2005/Atom}entry" => {}
-                                b"id" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_id = Some(cow.into_owned().trim().to_string()) } else { cur_id = Some(txt.trim().to_string()) } },
-                                b"title" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_title = Some(cow.into_owned().trim().to_string()) } else { cur_title = Some(txt.trim().to_string()) } },
-                                b"published" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_published = Some(cow.into_owned().trim().to_string()) } else { cur_published = Some(txt.trim().to_string()) } },
-                                b"journal_ref" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_journal_ref = Some(cow.into_owned().trim().to_string()) } else { cur_journal_ref = Some(txt.trim().to_string()) } },
-                                b"name" => if let Ok(txt) = reader.read_text(e.name()) { if let Ok(cow) = quick_unescape(&txt) { cur_authors.push(cow.into_owned().trim().to_string()) } else { cur_authors.push(txt.trim().to_string()) } },
-                                b"arxiv:primary_category" | b"primary_category" => for attr in e.attributes().with_checks(false) { if let Ok(att) = attr { if att.key.as_ref() == b"term" { let val = String::from_utf8_lossy(att.value.as_ref()).to_string(); cur_primary_cat = Some(val); } } },
+                                b"id" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_id = Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_id = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"title" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_title = Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_title = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"published" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_published =
+                                                Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_published = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"journal_ref" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_journal_ref =
+                                                Some(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_journal_ref = Some(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"name" => {
+                                    if let Ok(txt) = reader.read_text(e.name()) {
+                                        if let Ok(cow) = quick_unescape(&txt) {
+                                            cur_authors.push(cow.into_owned().trim().to_string())
+                                        } else {
+                                            cur_authors.push(txt.trim().to_string())
+                                        }
+                                    }
+                                }
+                                b"arxiv:primary_category" | b"primary_category" => {
+                                    for attr in e.attributes().with_checks(false) {
+                                        if let Ok(att) = attr {
+                                            if att.key.as_ref() == b"term" {
+                                                let val =
+                                                    String::from_utf8_lossy(att.value.as_ref())
+                                                        .to_string();
+                                                cur_primary_cat = Some(val);
+                                            }
+                                        }
+                                    }
+                                }
                                 _ => {}
                             }
                         }
-                        Ok(Event::End(ref e)) => { if e.local_name().as_ref() == b"entry" { let include = if let Some(pubdate) = &cur_published { if let Ok(dt) = DateTime::parse_from_rfc3339(pubdate) { let dt_utc = dt.with_timezone(&Utc); dt_utc >= start_date && dt_utc < end_date } else { false } } else { false }; if include { let year = cur_published.as_ref().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.year() as u32).unwrap_or(0); results.push(PublicationRecord { id: cur_id.take().unwrap_or_default(), title: cur_title.take().unwrap_or_default(), authors: cur_authors.clone(), year, venue: cur_journal_ref.take().or(cur_primary_cat.take()), source: String::from("arxiv"), }); } break } }
+                        Ok(Event::End(ref e)) => {
+                            if e.local_name().as_ref() == b"entry" {
+                                let include = if let Some(pubdate) = &cur_published {
+                                    if let Ok(dt) = DateTime::parse_from_rfc3339(pubdate) {
+                                        let dt_utc = dt.with_timezone(&Utc);
+                                        dt_utc >= start_date && dt_utc < end_date
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+                                if include {
+                                    let year = cur_published
+                                        .as_ref()
+                                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                                        .map(|d| d.year() as u32)
+                                        .unwrap_or(0);
+                                    results.push(PublicationRecord {
+                                        id: cur_id.take().unwrap_or_default(),
+                                        title: cur_title.take().unwrap_or_default(),
+                                        authors: cur_authors.clone(),
+                                        year,
+                                        venue: cur_journal_ref.take().or(cur_primary_cat.take()),
+                                        source: String::from("arxiv"),
+                                    });
+                                }
+                                break;
+                            }
+                        }
                         Ok(Event::Eof) => break,
                         Err(_) => break,
                         _ => {}
@@ -276,7 +531,9 @@ pub async fn scrape_range_with_config_async(
                 }
                 buf_acc.drain(0..end);
                 continue;
-            } else { break; }
+            } else {
+                break;
+            }
         }
 
         // be polite to arXiv: small delay between paged requests

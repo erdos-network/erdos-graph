@@ -72,9 +72,9 @@ mod tests {
         let start = Utc::now() - Duration::days(7);
         let end = Utc::now();
 
-    let result = run_chunk("arxiv", start, end, &mut datastore);
+        let result = run_chunk("arxiv", start, end, &mut datastore);
 
-    assert!(result.is_ok());
+        assert!(result.is_ok());
 
         // TODO: Verify publications were ingested
     }
@@ -87,9 +87,9 @@ mod tests {
         let start = Utc::now() - Duration::days(7);
         let end = Utc::now();
 
-    let result = run_chunk("unknown_source", start, end, &mut datastore);
+        let result = run_chunk("unknown_source", start, end, &mut datastore);
 
-    assert!(result.is_err());
+        assert!(result.is_err());
         // TODO: Verify error message mentions unknown source
     }
 
