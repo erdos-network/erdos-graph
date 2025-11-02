@@ -6,8 +6,14 @@ edition = "2024"
 [dependencies]
 indradb-lib = { version = "5.0", features = ["rocksdb-datastore"] }
 uuid = { version = "1.3", features = ["v4"] }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
+quick-xml = "0.31"
+reqwest = { version = "0.11", features = ["json", "gzip"] }
+tokio = { version = "1.0", features = ["full"] }
+flate2 = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.8"
+tokio-test = "0.4"
