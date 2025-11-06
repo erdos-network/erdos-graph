@@ -19,12 +19,29 @@ pub enum LogLevel {
     Error,
 }
 
+impl LogLevel {
+    /// Return a short string representation suitable for logs.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogLevel::Trace => "TRACE",
+            LogLevel::Debug => "DEBUG",
+            LogLevel::Info => "INFO",
+            LogLevel::Warn => "WARN",
+            LogLevel::Error => "ERROR",
+        }
+    }
+}
+
 /// Minimal logger interface used throughout the project.
 ///
 /// Implementors should be cheap to clone and thread-safe if used in multithreaded contexts.
 /// For stubs, implement `log` and optionally override convenience methods.
 /// TODO: consider adding `Send + Sync` bounds once we finalize the threading model.
-pub trait Logger {
+/// The logger trait used across the project.
+///
+/// Implementations must be `Send + Sync` so they can be shared across threads
+/// when the global facade is used.
+pub trait Logger: Send + Sync + 'static {
     /// Emit a log record at the given level.
     fn log(&self, level: LogLevel, message: &str);
 
@@ -72,7 +89,16 @@ pub struct StdoutLogger;
 
 impl Logger for StdoutLogger {
     fn log(&self, level: LogLevel, message: &str) {
-        println!("[{:?}] {}", level, message);
+        // Emit a small JSON object to stdout so logs are easier to parse
+        // by structured log collectors. Keep the shape minimal for now.
+        let ts = chrono::Utc::now().to_rfc3339();
+        // Example: {"ts":"...","level":"INFO","msg":"..."}
+        let json = serde_json::json!({
+            "ts": ts,
+            "level": level.as_str(),
+            "msg": message,
+        });
+        println!("{}", json);
     }
 
     fn flush(&self) {
