@@ -114,14 +114,20 @@ impl IngestionQueue {
         None
     }
     
+    /// Returns the current number of publications in the queue. 
     pub fn queue_size(&self) -> usize {
         self.state.lock().unwrap().queue.len()
     }
     
+    /// Returns true if all producers have finished.  
+    ///  
+    /// Producers are considered finished when all registered producers have unregistered,  
+    /// and the internal `producers_done` flag is set. 
     pub fn producers_finished(&self) -> bool {
         self.state.lock().unwrap().producers_done
     }
     
+    /// Returns the number of currently active producers. 
     pub fn active_producer_count(&self) -> usize {
         self.state.lock().unwrap().active_producers
     }
@@ -130,7 +136,7 @@ impl IngestionQueue {
     pub fn create_producer(&self) -> QueueProducer {
         self.register_producer();
         QueueProducer {
-            queue: Arc::clone(&self.state),
+            queue: self.clone(),
         }
     }
 }
@@ -147,33 +153,20 @@ impl Clone for IngestionQueue {
 
 /// RAII handle that auto-unregisters producer on drop, even if scraper panics.
 pub struct QueueProducer {
-    queue: Arc<Mutex<QueueState>>,
+    queue: IngestionQueue,
 }
 
 impl QueueProducer {
-    /// Adds a publication to the queue. Blocks with backpressure if queue is full.
+    /// Adds a publication to the queue. Delegates to the queue's enqueue method.
     pub fn submit(&self, record: PublicationRecord) -> Result<(), String> {
-        loop {
-            let mut state = self.queue.lock().unwrap();
-            if state.queue.len() < 10000 {
-                state.queue.push_back(record);
-                state.last_job_time = Some(Instant::now());
-                return Ok(());
-            }
-            drop(state);
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        self.queue.enqueue(record)
     }
 }
 
 impl Drop for QueueProducer {
     /// Automatically unregisters producer. Sets producers_done when last producer drops.
     fn drop(&mut self) {
-        let mut state = self.queue.lock().unwrap();
-        state.active_producers = state.active_producers.saturating_sub(1);
-        if state.active_producers == 0 {
-            state.producers_done = true;
-        }
+        self.queue.unregister_producer();
     }
 }
 
