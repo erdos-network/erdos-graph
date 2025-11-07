@@ -63,6 +63,7 @@ impl IngestionQueue {
     pub fn register_producer(&self) {
         let mut state = self.state.lock().unwrap();
         state.active_producers += 1;
+        state.producers_done = false; // Reset flag when new producer registers
     }
     
     /// Decrements the active producer count. Sets producers_done flag when count reaches zero.
