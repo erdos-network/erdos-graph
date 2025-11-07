@@ -123,7 +123,7 @@ impl IngestionQueue {
     /// Returns true if all producers have finished.  
     ///  
     /// Producers are considered finished when all registered producers have unregistered,  
-    /// and the internal `producers_done` flag is set. 
+    /// and the internal `producers_done` flag is set.
     pub fn producers_finished(&self) -> bool {
         self.state.lock().unwrap().producers_done
     }
