@@ -2,7 +2,7 @@
 
 // TODO: Add tests for StdoutLogger formatting once format is stabilized.
 
-use super::super::logger::{LogLevel, Logger, NoopLogger};
+use super::super::core::{LogLevel, Logger, NoopLogger};
 
 struct TestLogger {
     records: std::sync::Mutex<Vec<(LogLevel, String)>>,

@@ -13,9 +13,9 @@
 //! - Provide a global logger facade and initialization helper
 //! - Add feature flags to swap between implementations
 
-pub mod logger;
+pub mod core;
 
-pub use logger::{LogLevel, Logger, NoopLogger, StdoutLogger};
+pub use core::{LogLevel, Logger, NoopLogger, StdoutLogger};
 
 #[cfg(test)]
 pub mod tests;
