@@ -1,20 +1,15 @@
-//! Thread-safe publication queue with producer tracking and timeout control.
+//! Thread-safe publication queue with producer tracking.
 //!
 //! Provides a bounded buffer for PublicationRecords with backpressure handling.
 //! Tracks active producers via RAII handles to detect when all have finished.
 
 use crate::db::ingestion::PublicationRecord;
-use std::sync::{Arc, Mutex};
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Condvar, Mutex};
 
-/// Configuration for queue timeouts and limits.
+/// Configuration for queue limits.
 #[derive(Clone, Debug)]
 pub struct QueueConfig {
-    /// Stop if no new jobs arrive within this duration.
-    pub idle_timeout: Duration,
-    /// Stop after this total processing time regardless of activity.
-    pub max_processing_time: Duration,
     /// Maximum buffered publications before applying backpressure.
     pub max_queue_size: usize,
 }
@@ -22,8 +17,6 @@ pub struct QueueConfig {
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
-            idle_timeout: Duration::from_secs(30),
-            max_processing_time: Duration::from_secs(3600),
             max_queue_size: 10000,
         }
     }
@@ -32,7 +25,6 @@ impl Default for QueueConfig {
 /// Shared state protected by mutex for thread-safe access.
 struct QueueState {
     queue: VecDeque<PublicationRecord>,
-    last_job_time: Option<Instant>,
     producers_done: bool,
     active_producers: usize,
 }
@@ -42,96 +34,126 @@ struct QueueState {
 /// Cloneable to share across threads - each clone references the same underlying queue.
 pub struct IngestionQueue {
     state: Arc<Mutex<QueueState>>,
+    not_full: Arc<Condvar>,  // Notifies when queue has space
+    not_empty: Arc<Condvar>, // Notifies when queue has items
     config: QueueConfig,
 }
 
 impl IngestionQueue {
-    /// Creates a new queue with the given configuration.
+    /// Creates a new queue with the specified configuration.
     pub fn new(config: QueueConfig) -> Self {
         Self {
             state: Arc::new(Mutex::new(QueueState {
                 queue: VecDeque::new(),
-                last_job_time: None,
                 producers_done: false,
                 active_producers: 0,
             })),
+            not_full: Arc::new(Condvar::new()),
+            not_empty: Arc::new(Condvar::new()),
             config,
         }
     }
-    
+
     /// Increments the active producer count.
     pub fn register_producer(&self) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| {
+            eprintln!("Mutex poisoned in register_producer, recovering");
+            poisoned.into_inner()
+        });
         state.active_producers += 1;
     }
-    
+
     /// Decrements the active producer count. Sets producers_done flag when count reaches zero.
     pub fn unregister_producer(&self) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| {
+            eprintln!("Mutex poisoned in unregister_producer, recovering");
+            poisoned.into_inner()
+        });
         state.active_producers = state.active_producers.saturating_sub(1);
         if state.active_producers == 0 {
             state.producers_done = true;
         }
     }
-    
-    /// Adds a publication to the queue. Blocks with backpressure if queue is full.
-    pub fn enqueue(&self, record: PublicationRecord) -> Result<(), String> {
-        loop {
-            let mut state = self.state.lock().unwrap();
-            if state.queue.len() < self.config.max_queue_size {
-                state.queue.push_back(record);
-                state.last_job_time = Some(Instant::now());
-                return Ok(());
-            }
-            drop(state);
-            std::thread::sleep(Duration::from_millis(100));
+
+    /// Adds a publication to the queue. Blocks efficiently if queue is full.
+    ///
+    /// Uses condition variable to wait for space instead of polling.
+    pub fn enqueue(
+        &self,
+        record: PublicationRecord,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| {
+            eprintln!("Mutex poisoned in enqueue, recovering");
+            poisoned.into_inner()
+        });
+
+        // Wait until there's space in the queue
+        while state.queue.len() >= self.config.max_queue_size {
+            state = self.not_full.wait(state).unwrap_or_else(|poisoned| {
+                eprintln!("Mutex poisoned while waiting on not_full condvar, recovering");
+                poisoned.into_inner()
+            });
         }
+
+        state.queue.push_back(record);
+        // Notify a waiting consumer that an item is available
+        self.not_empty.notify_one();
+        Ok(())
     }
-    
+
     /// Removes and returns the next publication from the queue, or None if empty.
+    ///
+    /// Notifies waiting producers when space becomes available.
     pub fn dequeue(&self) -> Option<PublicationRecord> {
-        self.state.lock().unwrap().queue.pop_front()
+        let mut state = self.state.lock().unwrap_or_else(|poisoned| {
+            eprintln!("Mutex poisoned in dequeue, recovering");
+            poisoned.into_inner()
+        });
+        let result = state.queue.pop_front();
+        if result.is_some() {
+            // Notify a waiting producer that space is available
+            self.not_full.notify_one();
+        }
+        result
     }
-    
-    /// Checks stop conditions. Returns Some(reason) if processing should stop.
-    pub fn should_stop(&self, start_time: Instant) -> Option<String> {
-        let state = self.state.lock().unwrap();
-        
-        if start_time.elapsed() >= self.config.max_processing_time {
-            return Some(format!("Max processing time {:?} exceeded", self.config.max_processing_time));
-        }
-        
-        if state.producers_done && state.queue.is_empty() {
-            return Some("All producers finished and queue is empty".to_string());
-        }
-        
-        if let Some(last_job_time) = state.last_job_time {
-            if last_job_time.elapsed() >= self.config.idle_timeout {
-                return Some(format!("Idle timeout {:?} exceeded", self.config.idle_timeout));
-            }
-        }
-        
-        None
-    }
-    
-    /// Returns the current number of publications in the queue. 
+
+    /// Returns the current number of publications in the queue.
     pub fn queue_size(&self) -> usize {
-        self.state.lock().unwrap().queue.len()
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                eprintln!("Mutex poisoned in queue_size, recovering");
+                poisoned.into_inner()
+            })
+            .queue
+            .len()
     }
-    
+
     /// Returns true if all producers have finished.  
     ///  
     /// Producers are considered finished when all registered producers have unregistered,  
-    /// and the internal `producers_done` flag is set. 
+    /// and the internal `producers_done` flag is set.
     pub fn producers_finished(&self) -> bool {
-        self.state.lock().unwrap().producers_done
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                eprintln!("Mutex poisoned in producers_finished, recovering");
+                poisoned.into_inner()
+            })
+            .producers_done
     }
-    
-    /// Returns the number of currently active producers. 
+
+    /// Returns the number of currently active producers.
     pub fn active_producer_count(&self) -> usize {
-        self.state.lock().unwrap().active_producers
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                eprintln!("Mutex poisoned in active_producer_count, recovering");
+                poisoned.into_inner()
+            })
+            .active_producers
     }
-    
+
     /// Creates a RAII producer handle that auto-registers/unregisters.
     pub fn create_producer(&self) -> QueueProducer {
         self.register_producer();
@@ -146,6 +168,8 @@ impl Clone for IngestionQueue {
     fn clone(&self) -> Self {
         Self {
             state: Arc::clone(&self.state),
+            not_full: Arc::clone(&self.not_full),
+            not_empty: Arc::clone(&self.not_empty),
             config: self.config.clone(),
         }
     }
@@ -158,7 +182,10 @@ pub struct QueueProducer {
 
 impl QueueProducer {
     /// Adds a publication to the queue. Delegates to the queue's enqueue method.
-    pub fn submit(&self, record: PublicationRecord) -> Result<(), String> {
+    pub fn submit(
+        &self,
+        record: PublicationRecord,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.queue.enqueue(record)
     }
 }
@@ -169,4 +196,3 @@ impl Drop for QueueProducer {
         self.queue.unregister_producer();
     }
 }
-

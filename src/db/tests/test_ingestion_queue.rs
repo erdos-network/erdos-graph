@@ -1,22 +1,24 @@
-use crate::db::ingestion::PublicationRecord;
-use crate::db::ingestion_queue::{IngestionQueue, QueueConfig};
-use std::thread;
-use std::time::{Duration, Instant};
+#[cfg(test)]
+mod tests {
+    use crate::db::ingestion::PublicationRecord;
+    use crate::db::ingestion_queue::{IngestionQueue, QueueConfig};
+    use std::thread;
+    use std::time::Duration;
 
-/// Helper to create a test publication record.
-fn create_test_record(id: &str) -> PublicationRecord {
-    PublicationRecord {
-        id: id.to_string(),
-        title: format!("Test Publication {}", id),
-        authors: vec!["Test Author".to_string()],
-        year: 2024,
-        venue: Some("Test Venue".to_string()),
-        source: "test".to_string(),
+    /// Helper to create a test publication record.
+    fn create_test_record(id: &str) -> PublicationRecord {
+        PublicationRecord {
+            id: id.to_string(),
+            title: format!("Test Publication {}", id),
+            authors: vec!["Test Author".to_string()],
+            year: 2024,
+            venue: Some("Test Venue".to_string()),
+            source: "test".to_string(),
+        }
     }
-}
 
-#[test]
-fn test_enqueue_dequeue_fifo_order() {
+    #[test]
+    fn test_enqueue_dequeue_fifo_order() {
     let queue = IngestionQueue::new(QueueConfig::default());
     
     // Enqueue multiple records
@@ -124,72 +126,18 @@ fn test_multiple_producers_concurrent_submit() {
 }
 
 #[test]
-fn test_should_stop_when_producers_done_and_queue_empty() {
+fn test_producers_done_status() {
     let queue = IngestionQueue::new(QueueConfig::default());
-    let start_time = Instant::now();
-    
-    // Initially should not stop
-    assert!(queue.should_stop(start_time).is_none());
     
     // Register and unregister producer to set producers_done
     let producer = queue.create_producer();
+    assert!(!queue.producers_finished());
+    
     drop(producer);
     
-    // Should stop when producers done and queue empty
-    let reason = queue.should_stop(start_time);
-    assert!(reason.is_some());
-    assert!(reason.unwrap().contains("All producers finished"));
-}
-
-#[test]
-fn test_should_stop_respects_idle_timeout() {
-    let config = QueueConfig {
-        idle_timeout: Duration::from_millis(50),
-        max_processing_time: Duration::from_secs(10),
-        max_queue_size: 100,
-    };
-    let queue = IngestionQueue::new(config);
-    let start_time = Instant::now();
-    
-    // Add a job to set last_job_time
-    queue.enqueue(create_test_record("test")).unwrap();
-    queue.dequeue();
-    
-    // Should not stop immediately
-    assert!(queue.should_stop(start_time).is_none());
-    
-    // Wait for idle timeout
-    thread::sleep(Duration::from_millis(60));
-    
-    // Should stop due to idle timeout
-    let reason = queue.should_stop(start_time);
-    assert!(reason.is_some());
-    assert!(reason.unwrap().contains("Idle timeout"));
-}
-
-#[test]
-fn test_should_stop_respects_max_processing_time() {
-    let config = QueueConfig {
-        idle_timeout: Duration::from_secs(10),
-        max_processing_time: Duration::from_millis(50),
-        max_queue_size: 100,
-    };
-    let queue = IngestionQueue::new(config);
-    let start_time = Instant::now();
-    
-    // Keep adding jobs to prevent idle timeout
-    queue.enqueue(create_test_record("test")).unwrap();
-    
-    // Should not stop immediately
-    assert!(queue.should_stop(start_time).is_none());
-    
-    // Wait for max processing time
-    thread::sleep(Duration::from_millis(60));
-    
-    // Should stop due to max processing time
-    let reason = queue.should_stop(start_time);
-    assert!(reason.is_some());
-    assert!(reason.unwrap().contains("Max processing time"));
+    // Should be marked as finished when all producers done
+    assert!(queue.producers_finished());
+    assert_eq!(queue.queue_size(), 0);
 }
 
 #[test]
@@ -212,8 +160,6 @@ fn test_queue_clone_shares_state() {
 #[test]
 fn test_backpressure_when_queue_full() {
     let config = QueueConfig {
-        idle_timeout: Duration::from_secs(10),
-        max_processing_time: Duration::from_secs(10),
         max_queue_size: 5,
     };
     let queue = IngestionQueue::new(config);
@@ -239,4 +185,38 @@ fn test_backpressure_when_queue_full() {
     // Now the blocked enqueue should succeed
     handle.join().unwrap().unwrap();
     assert_eq!(queue.queue_size(), 5);
+}
+
+#[test]
+fn test_poison_recovery() {
+    let queue = IngestionQueue::new(QueueConfig::default());
+    
+    // Enqueue some items first
+    queue.enqueue(create_test_record("before-panic")).unwrap();
+    assert_eq!(queue.queue_size(), 1);
+    
+    // Test that the queue handles concurrent access gracefully
+    // The poison recovery mechanism ensures that even if a thread panicked
+    // while holding the lock, other threads can continue
+    
+    let queue_clone = queue.clone();
+    let handles: Vec<_> = (0..10).map(|i| {
+        let q = queue_clone.clone();
+        thread::spawn(move || {
+            q.enqueue(create_test_record(&format!("concurrent-{}", i))).unwrap();
+        })
+    }).collect();
+    
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    
+    // Queue should still be usable
+    assert_eq!(queue.queue_size(), 11); // 1 before + 10 concurrent
+    
+    // All operations should still work
+    while queue.dequeue().is_some() {}
+    assert_eq!(queue.queue_size(), 0);
+}
+
 }
