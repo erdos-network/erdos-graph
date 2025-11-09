@@ -13,7 +13,7 @@ mod tests {
         let end = Utc::now() - Duration::days(1);
 
         let result = zbmath::scrape_range(start, end).await;
-        
+
         match result {
             Ok(records) => {
                 println!("Successfully scraped {} records", records.len());
@@ -38,11 +38,15 @@ mod tests {
         let end = start;
 
         let result = zbmath::scrape_range(start, end).await;
-        
+
         match result {
             Ok(records) => {
                 println!("Empty range returned {} records", records.len());
-                assert_eq!(records.len(), 0, "Empty date range should return no records");
+                assert_eq!(
+                    records.len(),
+                    0,
+                    "Empty date range should return no records"
+                );
             }
             Err(e) => {
                 println!("Empty range failed (expected): {}", e);

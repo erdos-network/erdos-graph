@@ -1,5 +1,5 @@
-use serde_xml_rs::from_str;
 use serde::Deserialize;
+use serde_xml_rs::from_str;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]

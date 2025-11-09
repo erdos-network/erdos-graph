@@ -18,7 +18,8 @@ mod tests {
             chunk_size,
             Some("arxiv"), // Test just one source
             &mut datastore,
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
 
@@ -44,7 +45,8 @@ mod tests {
             chunk_size,
             None, // Test all sources
             &mut datastore,
-        ).await;
+        )
+        .await;
 
         assert!(result.is_ok());
 
