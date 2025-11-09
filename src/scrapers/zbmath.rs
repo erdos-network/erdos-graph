@@ -295,12 +295,7 @@ fn convert_to_publication_record(
     // Extract year from date field
     let year = if let Some(date_str) = dc.date {
         // Try to parse year from various date formats
-        if let Ok(year_match) = date_str
-            .chars()
-            .take(4)
-            .collect::<String>()
-            .parse::<u32>()
-        {
+        if let Ok(year_match) = date_str.chars().take(4).collect::<String>().parse::<u32>() {
             year_match
         } else {
             return Ok(None); // Skip records without valid year
