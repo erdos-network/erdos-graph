@@ -5,9 +5,9 @@ mod tests {
     use indradb::{Database, MemoryDatastore};
 
     /// Test the complete scraping orchestration in "initial" mode.
-    #[test]
+    #[tokio::test]
     #[ignore = "Orchestrator integration test - scrapers not yet implemented"]
-    fn test_run_scrape_initial_mode() {
+    async fn test_run_scrape_initial_mode() {
         let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let chunk_size = Duration::days(7);
 
@@ -18,7 +18,7 @@ mod tests {
             chunk_size,
             Some("arxiv"), // Test just one source
             &mut datastore,
-        );
+        ).await;
 
         assert!(result.is_ok());
 
@@ -29,9 +29,9 @@ mod tests {
     }
 
     /// Test the orchestration in "weekly" mode with checkpoint restoration.
-    #[test]
+    #[tokio::test]
     #[ignore = "Orchestrator integration test - scrapers not yet implemented"]
-    fn test_run_scrape_weekly_mode() {
+    async fn test_run_scrape_weekly_mode() {
         let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let chunk_size = Duration::days(1);
 
@@ -44,7 +44,7 @@ mod tests {
             chunk_size,
             None, // Test all sources
             &mut datastore,
-        );
+        ).await;
 
         assert!(result.is_ok());
 
@@ -52,27 +52,27 @@ mod tests {
     }
 
     /// Test that invalid mode strings are rejected.
-    #[test]
+    #[tokio::test]
     #[ignore = "Orchestrator integration test - scrapers not yet implemented"]
-    fn test_run_scrape_invalid_mode() {
+    async fn test_run_scrape_invalid_mode() {
         let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let chunk_size = Duration::days(7);
 
-        let result = run_scrape("invalid_mode", None, None, chunk_size, None, &mut datastore);
+        let result = run_scrape("invalid_mode", None, None, chunk_size, None, &mut datastore).await;
 
         assert!(result.is_err());
         // TODO: Verify error message mentions invalid mode
     }
 
     /// Test run_chunk with a specific source.
-    #[test]
+    #[tokio::test]
     #[ignore = "Chunk processing test - scrapers not yet implemented"]
-    fn test_run_chunk_arxiv() {
+    async fn test_run_chunk_arxiv() {
         let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let start = Utc::now() - Duration::days(7);
         let end = Utc::now();
 
-        let result = run_chunk("arxiv", start, end, &mut datastore);
+        let result = run_chunk("arxiv", start, end, &mut datastore).await;
 
         assert!(result.is_ok());
 
@@ -80,14 +80,14 @@ mod tests {
     }
 
     /// Test that run_chunk rejects unknown sources.
-    #[test]
+    #[tokio::test]
     #[ignore = "Chunk processing test - scrapers not yet implemented"]
-    fn test_run_chunk_unknown_source() {
+    async fn test_run_chunk_unknown_source() {
         let mut datastore: Database<MemoryDatastore> = MemoryDatastore::new_db();
         let start = Utc::now() - Duration::days(7);
         let end = Utc::now();
 
-        let result = run_chunk("unknown_source", start, end, &mut datastore);
+        let result = run_chunk("unknown_source", start, end, &mut datastore).await;
 
         assert!(result.is_err());
         // TODO: Verify error message mentions unknown source
