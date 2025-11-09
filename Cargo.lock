@@ -263,10 +263,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "indradb-lib",
- "serde",
- "serde_json",
  "reqwest",
+ "serde",
  "serde-xml-rs",
+ "serde_json",
  "sha2",
  "tempfile",
  "tokio",
