@@ -8,6 +8,7 @@ mod tests {
     /// This test verifies that the scraper can handle a real API call
     /// and parse XML responses correctly.
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_scrape_range() {
         let start = Utc::now() - Duration::days(2);
         let end = Utc::now() - Duration::days(1);
@@ -33,6 +34,7 @@ mod tests {
 
     /// Test that scrape_range handles empty date ranges.
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_empty_range() {
         let start = Utc::now();
         let end = start;

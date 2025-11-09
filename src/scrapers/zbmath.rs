@@ -324,6 +324,7 @@ mod tests {
     use serde_xml_rs::from_str;
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_api_call() {
         let url = "https://oai.zbmath.org/v1/";
         let params = [
@@ -381,6 +382,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_api_no_results() {
         // Use a date range that's very unlikely to have results or is invalid
         let url = "https://oai.zbmath.org/v1/";
@@ -478,6 +480,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_api_with_reqwest_directly() {
         // This is exactly equivalent to your curl command
         let response = reqwest::Client::new()
@@ -505,6 +508,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_scrape_range_small() {
         use chrono::TimeZone;
 
@@ -538,6 +542,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_scrape_range_large_with_pagination() {
         use chrono::TimeZone;
 
@@ -642,6 +647,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_scrape_chunk_pagination_directly() {
         use chrono::TimeZone;
 
@@ -656,7 +662,7 @@ mod tests {
             Ok(records) => {
                 println!("Direct chunk scraping found {} records", records.len());
 
-                if records.len() > 0 {
+                if !records.is_empty() {
                     println!("✓ Successfully retrieved records from chunk");
 
                     // Check for reasonable data
@@ -741,6 +747,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_pagination_resumption_token_handling() {
         // Test our pagination logic by examining the API behavior more closely
         let client = reqwest::Client::new();
