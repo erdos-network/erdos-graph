@@ -32,9 +32,9 @@ struct Record {
 struct RecordHeader {
     identifier: String,
     #[serde(rename = "datestamp")]
-    date_stamp: String,
+    _date_stamp: String,
     #[serde(rename = "setSpec", default)]
-    set_spec: Vec<String>,
+    _set_spec: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,29 +46,29 @@ struct Metadata {
 #[derive(Debug, Deserialize)]
 struct DublinCore {
     #[serde(rename = "contributor")]
-    contributor: Option<String>,
+    _contributor: Option<String>,
     #[serde(rename = "creator")]
     creator: Option<String>,
     #[serde(rename = "date")]
     date: Option<String>,
     #[serde(rename = "identifier")]
-    identifier: Option<String>,
+    _identifier: Option<String>,
     #[serde(rename = "language")]
-    language: Option<String>,
+    _language: Option<String>,
     #[serde(rename = "publisher")]
-    publisher: Option<String>,
+    _publisher: Option<String>,
     #[serde(rename = "relation")]
-    relation: Option<String>,
+    _relation: Option<String>,
     #[serde(rename = "rights")]
-    rights: Option<String>,
+    _rights: Option<String>,
     #[serde(rename = "source")]
     source: Option<String>,
     #[serde(rename = "subject")]
-    subject: Option<String>,
+    _subject: Option<String>,
     #[serde(rename = "title")]
     title: Option<String>,
     #[serde(rename = "type")]
-    doc_type: Option<String>,
+    _doc_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,13 +295,7 @@ fn convert_to_publication_record(
     // Extract year from date field
     let year = if let Some(date_str) = dc.date {
         // Try to parse year from various date formats
-        if let Some(year_match) = date_str
-            .chars()
-            .take(4)
-            .collect::<String>()
-            .parse::<u32>()
-            .ok()
-        {
+        if let Ok(year_match) = date_str.chars().take(4).collect::<String>().parse::<u32>() {
             year_match
         } else {
             return Ok(None); // Skip records without valid year
@@ -330,6 +324,7 @@ mod tests {
     use serde_xml_rs::from_str;
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_api_call() {
         let url = "https://oai.zbmath.org/v1/";
         let params = [
@@ -387,6 +382,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_api_no_results() {
         // Use a date range that's very unlikely to have results or is invalid
         let url = "https://oai.zbmath.org/v1/";
@@ -484,6 +480,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_zbmath_api_with_reqwest_directly() {
         // This is exactly equivalent to your curl command
         let response = reqwest::Client::new()
@@ -511,6 +508,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_scrape_range_small() {
         use chrono::TimeZone;
 
@@ -544,6 +542,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_scrape_range_large_with_pagination() {
         use chrono::TimeZone;
 
@@ -648,6 +647,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_scrape_chunk_pagination_directly() {
         use chrono::TimeZone;
 
@@ -662,7 +662,7 @@ mod tests {
             Ok(records) => {
                 println!("Direct chunk scraping found {} records", records.len());
 
-                if records.len() > 0 {
+                if !records.is_empty() {
                     println!("✓ Successfully retrieved records from chunk");
 
                     // Check for reasonable data
@@ -697,23 +697,23 @@ mod tests {
         let record = Record {
             header: RecordHeader {
                 identifier: "oai:zbmath.org:1234567".to_string(),
-                date_stamp: "2024-01-01".to_string(),
-                set_spec: vec![],
+                _date_stamp: "2024-01-01".to_string(),
+                _set_spec: vec![],
             },
             metadata: Some(Metadata {
                 dc: DublinCore {
-                    contributor: None,
+                    _contributor: None,
                     creator: Some("Smith, John; Doe, Jane".to_string()),
                     date: Some("2024".to_string()),
-                    identifier: Some("zbMATH:1234567".to_string()),
-                    language: Some("en".to_string()),
-                    publisher: Some("Academic Press".to_string()),
-                    relation: None,
-                    rights: None,
+                    _identifier: Some("zbMATH:1234567".to_string()),
+                    _language: Some("en".to_string()),
+                    _publisher: Some("Academic Press".to_string()),
+                    _relation: None,
+                    _rights: None,
                     source: Some("Journal of Mathematics".to_string()),
-                    subject: Some("Mathematics".to_string()),
+                    _subject: Some("Mathematics".to_string()),
                     title: Some("A Study of Graph Theory".to_string()),
-                    doc_type: Some("article".to_string()),
+                    _doc_type: Some("article".to_string()),
                 },
             }),
         };
@@ -736,8 +736,8 @@ mod tests {
         let record = Record {
             header: RecordHeader {
                 identifier: "oai:zbmath.org:1234567".to_string(),
-                date_stamp: "2024-01-01".to_string(),
-                set_spec: vec![],
+                _date_stamp: "2024-01-01".to_string(),
+                _set_spec: vec![],
             },
             metadata: None, // No metadata
         };
@@ -747,6 +747,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Makes real API calls - slow integration test"]
     async fn test_pagination_resumption_token_handling() {
         // Test our pagination logic by examining the API behavior more closely
         let client = reqwest::Client::new();
@@ -878,18 +879,18 @@ mod tests {
 
         // Test complete structures
         let dublin_core = DublinCore {
-            contributor: Some("contributor".to_string()),
+            _contributor: Some("contributor".to_string()),
             creator: Some("creator".to_string()),
             date: Some("2024".to_string()),
-            identifier: Some("id".to_string()),
-            language: Some("en".to_string()),
-            publisher: Some("publisher".to_string()),
-            relation: Some("relation".to_string()),
-            rights: Some("rights".to_string()),
+            _identifier: Some("id".to_string()),
+            _language: Some("en".to_string()),
+            _publisher: Some("publisher".to_string()),
+            _relation: Some("relation".to_string()),
+            _rights: Some("rights".to_string()),
             source: Some("source".to_string()),
-            subject: Some("subject".to_string()),
+            _subject: Some("subject".to_string()),
             title: Some("title".to_string()),
-            doc_type: Some("article".to_string()),
+            _doc_type: Some("article".to_string()),
         };
         println!("DublinCore: {:?}", dublin_core);
 
@@ -898,8 +899,8 @@ mod tests {
 
         let record_header = RecordHeader {
             identifier: "test-id".to_string(),
-            date_stamp: "2024-01-01".to_string(),
-            set_spec: vec!["spec1".to_string(), "spec2".to_string()],
+            _date_stamp: "2024-01-01".to_string(),
+            _set_spec: vec!["spec1".to_string(), "spec2".to_string()],
         };
         println!("RecordHeader: {:?}", record_header);
 

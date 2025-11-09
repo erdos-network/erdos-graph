@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde_xml_rs::from_str;
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct OaiPmh {
@@ -10,6 +11,7 @@ struct OaiPmh {
     error: Option<OaiError>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct ListRecords {
     #[serde(rename = "record", default)]
@@ -18,12 +20,14 @@ struct ListRecords {
     resumption_token: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct Record {
     header: RecordHeader,
     metadata: Option<Metadata>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct RecordHeader {
     identifier: String,
@@ -33,12 +37,14 @@ struct RecordHeader {
     set_spec: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct Metadata {
     #[serde(rename = "dc")]
     dc: DublinCore,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct DublinCore {
     #[serde(rename = "contributor")]
@@ -67,6 +73,7 @@ struct DublinCore {
     doc_type: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct OaiError {
     #[serde(rename = "@code")]
