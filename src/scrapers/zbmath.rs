@@ -5,7 +5,6 @@ use serde::Deserialize;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
 
-#[cfg(not(test))]
 const ZBMATH_BASE_URL: &str = "https://oai.zbmath.org/v1/";
 
 #[derive(Clone, Debug)]
@@ -192,8 +191,6 @@ pub async fn scrape_range_with_config(
     println!("Total records scraped: {}", all_records.len());
     Ok(all_records)
 }
-
-
 
 /// Scrapes a single date chunk with custom configuration.
 pub async fn scrape_chunk_with_config(
