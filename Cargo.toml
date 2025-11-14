@@ -17,3 +17,4 @@ tokio = { version = "1.0", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3.8"
+mockito = "1.2"

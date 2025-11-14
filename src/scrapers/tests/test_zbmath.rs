@@ -1,60 +1,726 @@
 #[cfg(test)]
 mod tests {
-    use crate::scrapers::zbmath;
-    use chrono::{Duration, Utc};
+    use crate::scrapers::zbmath::{DublinCore, Metadata, OaiPmh, Record, RecordHeader};
+    use crate::scrapers::zbmath::{
+        ZbmathConfig, convert_to_publication_record, scrape_chunk_with_config,
+        scrape_range_with_config,
+    };
+    use chrono::{TimeZone, Utc};
+    use mockito::{Matcher, Server};
 
-    /// Test scraping zbMATH publications in a date range.
-    ///
-    /// This test verifies that the scraper can handle a real API call
-    /// and parse XML responses correctly.
-    #[tokio::test]
-    #[ignore = "Makes real API calls - slow integration test"]
-    async fn test_zbmath_scrape_range() {
-        let start = Utc::now() - Duration::days(2);
-        let end = Utc::now() - Duration::days(1);
-
-        let result = zbmath::scrape_range(start, end).await;
-
-        match result {
-            Ok(records) => {
-                println!("Successfully scraped {} records", records.len());
-                // The result might be empty, which is fine
-            }
-            Err(e) => {
-                println!("Scraping failed (may be expected for recent dates): {}", e);
-                // Don't panic - the API might legitimately have no records for recent dates
-            }
-        }
-
-        // TODO: Once implemented, add assertions like:
-        // let records = result.unwrap();
-        // assert!(!records.is_empty());
-        // assert_eq!(records[0].source, "zbmath");
+    // Helper function for testing scrape_range with mock server
+    async fn test_scrape_range_with_mock_url(
+        start: chrono::DateTime<Utc>,
+        end: chrono::DateTime<Utc>,
+        mock_url: &str,
+    ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
+        let config = ZbmathConfig {
+            base_url: mock_url.to_string(),
+            chunk_size_days: 7,
+            delay_between_chunks_ms: 1, // Fast for tests
+            delay_between_pages_ms: 1,  // Fast for tests
+        };
+        scrape_range_with_config(start, end, config).await
     }
 
-    /// Test that scrape_range handles empty date ranges.
+    // Helper function for testing scrape_chunk with mock server
+    async fn test_scrape_chunk_with_mock_url(
+        client: &reqwest::Client,
+        start: chrono::DateTime<Utc>,
+        end: chrono::DateTime<Utc>,
+        mock_url: &str,
+    ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
+        let config = ZbmathConfig {
+            base_url: mock_url.to_string(),
+            chunk_size_days: 7,
+            delay_between_chunks_ms: 1,
+            delay_between_pages_ms: 1,
+        };
+        scrape_chunk_with_config(client, start, end, &config).await
+    }
+
+    /// Test ZbmathConfig Default implementation
+    #[test]
+    fn test_zbmath_config_default() {
+        let config = ZbmathConfig::default();
+
+        assert_eq!(config.base_url, "https://oai.zbmath.org/v1/");
+        assert_eq!(config.chunk_size_days, 7);
+        assert_eq!(config.delay_between_chunks_ms, 1000);
+        assert_eq!(config.delay_between_pages_ms, 500);
+    }
+
+    /// Test ZbmathConfig custom configuration
+    #[test]
+    fn test_zbmath_config_custom() {
+        let config = ZbmathConfig {
+            base_url: "https://custom-zbmath.example.com/".to_string(),
+            chunk_size_days: 14,
+            delay_between_chunks_ms: 2000,
+            delay_between_pages_ms: 1000,
+        };
+
+        assert_eq!(config.base_url, "https://custom-zbmath.example.com/");
+        assert_eq!(config.chunk_size_days, 14);
+        assert_eq!(config.delay_between_chunks_ms, 2000);
+        assert_eq!(config.delay_between_pages_ms, 1000);
+    }
+
+    /// Test ZbmathConfig Clone implementation
+    #[test]
+    fn test_zbmath_config_clone() {
+        let config1 = ZbmathConfig::default();
+        let config2 = config1.clone();
+
+        assert_eq!(config1.base_url, config2.base_url);
+        assert_eq!(config1.chunk_size_days, config2.chunk_size_days);
+        assert_eq!(
+            config1.delay_between_chunks_ms,
+            config2.delay_between_chunks_ms
+        );
+        assert_eq!(
+            config1.delay_between_pages_ms,
+            config2.delay_between_pages_ms
+        );
+    }
+
+    /// Test the new configuration-based API
     #[tokio::test]
-    #[ignore = "Makes real API calls - slow integration test"]
+    async fn test_zbmath_config_api() {
+        let mut server = Server::new_async().await;
+
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath:1234567</identifier>
+                <datestamp>2024-01-01T00:00:00Z</datestamp>
+            </header>
+            <metadata>
+                <dc xmlns="http://purl.org/dc/elements/1.1/">
+                    <title>Test Configuration Paper</title>
+                    <creator>Config, Test</creator>
+                    <date>2024</date>
+                    <source>Journal of Config Testing</source>
+                </dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(mock_response)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        // Test the new config-based API
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Test Configuration Paper");
+        assert_eq!(records[0].authors, vec!["Config, Test"]);
+        assert_eq!(records[0].year, 2024);
+        assert_eq!(records[0].source, "zbmath");
+    }
+
+    /// Test scraping zbMATH publications in a date range using mocked API.
+    ///
+    /// This test verifies that the scraper can handle API responses
+    /// and parse XML responses correctly.
+    #[tokio::test]
+    async fn test_zbmath_scrape_range() {
+        let mut server = Server::new_async().await;
+
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:1234567</identifier>
+                <datestamp>2024-01-01</datestamp>
+                <setSpec>mathematics</setSpec>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>Test Algebra Paper</dc:title>
+                    <dc:creator>Johnson, Alice; Williams, Bob</dc:creator>
+                    <dc:date>2024</dc:date>
+                    <dc:source>Journal of Algebra</dc:source>
+                    <dc:identifier>zbMATH:1234567</dc:identifier>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:7654321</identifier>
+                <datestamp>2024-01-02</datestamp>
+                <setSpec>mathematics</setSpec>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>Advanced Number Theory</dc:title>
+                    <dc:creator>Smith, Carol</dc:creator>
+                    <dc:date>2024</dc:date>
+                    <dc:source>Number Theory Journal</dc:source>
+                    <dc:identifier>zbMATH:7654321</dc:identifier>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(mock_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 3, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].title, "Test Algebra Paper");
+        assert_eq!(records[0].authors, vec!["Johnson, Alice", "Williams, Bob"]);
+        assert_eq!(records[0].year, 2024);
+        assert_eq!(records[0].source, "zbmath");
+        assert_eq!(records[1].title, "Advanced Number Theory");
+        assert_eq!(records[1].authors, vec!["Smith, Carol"]);
+    }
+
+    /// Test that scrape_chunk handles no records match scenario.
+    #[tokio::test]
     async fn test_zbmath_empty_range() {
-        let start = Utc::now();
-        let end = start;
+        let mut server = Server::new_async().await;
 
-        let result = zbmath::scrape_range(start, end).await;
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="noRecordsMatch">No records match the given criteria</error>
+</OAI-PMH>"#;
 
-        match result {
-            Ok(records) => {
-                println!("Empty range returned {} records", records.len());
-                assert_eq!(
-                    records.len(),
-                    0,
-                    "Empty date range should return no records"
-                );
-            }
-            Err(e) => {
-                println!("Empty range failed (expected): {}", e);
-                // This is expected behavior for empty ranges
-            }
-        }
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(400)
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(); // Same start and end
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        // Should succeed with empty results when no records match
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(
+            records.len(),
+            0,
+            "No records match should return empty results"
+        );
+    }
+
+    /// Test successful scrape_chunk with mocked server
+    #[tokio::test]
+    async fn test_scrape_chunk_mocked_success() {
+        let mut server = Server::new_async().await;
+
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:1234567</identifier>
+                <datestamp>2024-01-01</datestamp>
+                <setSpec>mathematics</setSpec>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>Test Graph Theory Paper</dc:title>
+                    <dc:creator>Smith, John; Doe, Jane</dc:creator>
+                    <dc:date>2024</dc:date>
+                    <dc:source>Journal of Mathematics</dc:source>
+                    <dc:identifier>zbMATH:1234567</dc:identifier>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(mock_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Test Graph Theory Paper");
+        assert_eq!(records[0].authors, vec!["Smith, John", "Doe, Jane"]);
+        assert_eq!(records[0].year, 2024);
+        assert_eq!(records[0].source, "zbmath");
+    }
+
+    /// Test API error responses
+    #[tokio::test]
+    async fn test_scrape_chunk_no_records_match() {
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="noRecordsMatch">No records match the given criteria</error>
+</OAI-PMH>"#;
+
+        let parsed: OaiPmh = serde_xml_rs::from_str(mock_response).unwrap();
+
+        assert!(parsed.error.is_some());
+        let error = parsed.error.unwrap();
+        assert_eq!(error.code, "noRecordsMatch");
+        assert_eq!(error.message, "No records match the given criteria");
+    }
+
+    /// Test API bad argument error
+    #[tokio::test]
+    async fn test_scrape_chunk_bad_argument() {
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="badArgument">Invalid date format</error>
+</OAI-PMH>"#;
+
+        let parsed: OaiPmh = serde_xml_rs::from_str(mock_response).unwrap();
+
+        assert!(parsed.error.is_some());
+        let error = parsed.error.unwrap();
+        assert_eq!(error.code, "badArgument");
+        assert_eq!(error.message, "Invalid date format");
+    }
+
+    /// Test pagination with resumption token
+    #[tokio::test]
+    async fn test_scrape_chunk_with_pagination() {
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:1111111</identifier>
+                <datestamp>2024-01-01</datestamp>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>First Paper</dc:title>
+                    <dc:creator>Author One</dc:creator>
+                    <dc:date>2024</dc:date>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+        <resumptionToken>mock-token-123</resumptionToken>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        let parsed: OaiPmh = serde_xml_rs::from_str(mock_response).unwrap();
+
+        assert!(parsed.list_records.is_some());
+        let records = parsed.list_records.unwrap();
+        assert_eq!(records.records.len(), 1);
+        assert!(records.resumption_token.is_some());
+        assert_eq!(records.resumption_token.unwrap(), "mock-token-123");
+    }
+
+    /// Test convert_to_publication_record with various edge cases
+    #[test]
+    fn test_convert_to_publication_record_edge_cases() {
+        // Test with empty creator
+        let record = Record {
+            header: RecordHeader {
+                identifier: "oai:zbmath.org:1234567".to_string(),
+                date_stamp: "2024-01-01".to_string(),
+                set_spec: vec![],
+            },
+            metadata: Some(Metadata {
+                dc: DublinCore {
+                    contributor: None,
+                    creator: None, // No creator
+                    date: Some("2024".to_string()),
+                    identifier: Some("zbMATH:1234567".to_string()),
+                    language: Some("en".to_string()),
+                    publisher: Some("Academic Press".to_string()),
+                    relation: None,
+                    rights: None,
+                    source: Some("Journal of Mathematics".to_string()),
+                    subject: Some("Mathematics".to_string()),
+                    title: Some("A Study of Graph Theory".to_string()),
+                    doc_type: Some("article".to_string()),
+                },
+            }),
+        };
+
+        let result = convert_to_publication_record(record).unwrap();
+        assert!(result.is_some());
+
+        let pub_record = result.unwrap();
+        assert!(pub_record.authors.is_empty()); // Should be empty array
+    }
+
+    /// Test with invalid year
+    #[test]
+    fn test_convert_to_publication_record_invalid_year() {
+        let record = Record {
+            header: RecordHeader {
+                identifier: "oai:zbmath.org:1234567".to_string(),
+                date_stamp: "2024-01-01".to_string(),
+                set_spec: vec![],
+            },
+            metadata: Some(Metadata {
+                dc: DublinCore {
+                    contributor: None,
+                    creator: Some("Smith, John".to_string()),
+                    date: Some("invalid-year".to_string()), // Invalid year
+                    identifier: Some("zbMATH:1234567".to_string()),
+                    language: Some("en".to_string()),
+                    publisher: Some("Academic Press".to_string()),
+                    relation: None,
+                    rights: None,
+                    source: Some("Journal of Mathematics".to_string()),
+                    subject: Some("Mathematics".to_string()),
+                    title: Some("A Study of Graph Theory".to_string()),
+                    doc_type: Some("article".to_string()),
+                },
+            }),
+        };
+
+        let result = convert_to_publication_record(record).unwrap();
+        assert!(result.is_none()); // Should return None for invalid year
+    }
+
+    /// Test with missing date
+    #[test]
+    fn test_convert_to_publication_record_missing_date() {
+        let record = Record {
+            header: RecordHeader {
+                identifier: "oai:zbmath.org:1234567".to_string(),
+                date_stamp: "2024-01-01".to_string(),
+                set_spec: vec![],
+            },
+            metadata: Some(Metadata {
+                dc: DublinCore {
+                    contributor: None,
+                    creator: Some("Smith, John".to_string()),
+                    date: None, // Missing date
+                    identifier: Some("zbMATH:1234567".to_string()),
+                    language: Some("en".to_string()),
+                    publisher: Some("Academic Press".to_string()),
+                    relation: None,
+                    rights: None,
+                    source: Some("Journal of Mathematics".to_string()),
+                    subject: Some("Mathematics".to_string()),
+                    title: Some("A Study of Graph Theory".to_string()),
+                    doc_type: Some("article".to_string()),
+                },
+            }),
+        };
+
+        let result = convert_to_publication_record(record).unwrap();
+        assert!(result.is_none()); // Should return None for missing date
+    }
+
+    /// Test with missing title (should use default)
+    #[test]
+    fn test_convert_to_publication_record_missing_title() {
+        let record = Record {
+            header: RecordHeader {
+                identifier: "oai:zbmath.org:1234567".to_string(),
+                date_stamp: "2024-01-01".to_string(),
+                set_spec: vec![],
+            },
+            metadata: Some(Metadata {
+                dc: DublinCore {
+                    contributor: None,
+                    creator: Some("Smith, John".to_string()),
+                    date: Some("2024".to_string()),
+                    identifier: Some("zbMATH:1234567".to_string()),
+                    language: Some("en".to_string()),
+                    publisher: Some("Academic Press".to_string()),
+                    relation: None,
+                    rights: None,
+                    source: Some("Journal of Mathematics".to_string()),
+                    subject: Some("Mathematics".to_string()),
+                    title: None, // Missing title
+                    doc_type: Some("article".to_string()),
+                },
+            }),
+        };
+
+        let result = convert_to_publication_record(record).unwrap();
+        assert!(result.is_some());
+
+        let pub_record = result.unwrap();
+        assert_eq!(pub_record.title, "Unknown Title"); // Should use default
+    }
+
+    /// Test complex author parsing
+    #[test]
+    fn test_convert_to_publication_record_complex_authors() {
+        let record = Record {
+            header: RecordHeader {
+                identifier: "oai:zbmath.org:1234567".to_string(),
+                date_stamp: "2024-01-01".to_string(),
+                set_spec: vec![],
+            },
+            metadata: Some(Metadata {
+                dc: DublinCore {
+                    contributor: None,
+                    creator: Some("Smith, John A.; ; Doe, Jane B.;  ; Johnson, Bob".to_string()), // Complex with empty entries
+                    date: Some("2024".to_string()),
+                    identifier: Some("zbMATH:1234567".to_string()),
+                    language: Some("en".to_string()),
+                    publisher: Some("Academic Press".to_string()),
+                    relation: None,
+                    rights: None,
+                    source: Some("Journal of Mathematics".to_string()),
+                    subject: Some("Mathematics".to_string()),
+                    title: Some("A Study of Graph Theory".to_string()),
+                    doc_type: Some("article".to_string()),
+                },
+            }),
+        };
+
+        let result = convert_to_publication_record(record).unwrap();
+        assert!(result.is_some());
+
+        let pub_record = result.unwrap();
+        // Should filter out empty entries and trim whitespace
+        assert_eq!(
+            pub_record.authors,
+            vec!["Smith, John A.", "Doe, Jane B.", "Johnson, Bob"]
+        );
+    }
+
+    /// Test HTTP error handling
+    #[tokio::test]
+    async fn test_scrape_chunk_http_error() {
+        let mut server = Server::new_async().await;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("HTTP error 500"));
+    }
+
+    /// Test noRecordsMatch error handling
+    #[tokio::test]
+    async fn test_scrape_chunk_no_records_error() {
+        let mut server = Server::new_async().await;
+
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="noRecordsMatch">No records match the given criteria</error>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(400)
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        // This should succeed with empty results, not error
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    /// Test badArgument error handling
+    #[tokio::test]
+    async fn test_scrape_chunk_bad_argument_error() {
+        let mut server = Server::new_async().await;
+
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="badArgument">Invalid date format</error>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(400)
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Bad API argument"));
+        assert!(error_msg.contains("Invalid date format"));
+    }
+
+    /// Test pagination flow with multiple pages
+    #[tokio::test]
+    async fn test_scrape_chunk_pagination_flow() {
+        let mut server = Server::new_async().await;
+
+        // First request with resumption token
+        let first_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:1111111</identifier>
+                <datestamp>2024-01-01</datestamp>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>First Paper</dc:title>
+                    <dc:creator>Author One</dc:creator>
+                    <dc:date>2024</dc:date>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+        <resumptionToken>page2token</resumptionToken>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        // Second request (using resumption token)
+        let second_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:2222222</identifier>
+                <datestamp>2024-01-01</datestamp>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>Second Paper</dc:title>
+                    <dc:creator>Author Two</dc:creator>
+                    <dc:date>2024</dc:date>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        // Mock first request (with date parameters)
+        let _mock1 = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+                Matcher::UrlEncoded("from".into(), "2024-01-01T00:00:00Z".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(first_response)
+            .create_async()
+            .await;
+
+        // Mock second request (with resumption token)
+        let _mock2 = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("resumptionToken".into(), "page2token".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(second_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 2); // Should have both records from both pages
+        assert_eq!(records[0].title, "First Paper");
+        assert_eq!(records[1].title, "Second Paper");
     }
 
     /// Test API rate limiting handling.
@@ -83,5 +749,502 @@ mod tests {
         // - MSC (Mathematics Subject Classification) codes
         // - zbMATH ID format
         // - Review text extraction (if applicable)
+    }
+
+    /// Test scrape_range function with single chunk
+    #[tokio::test]
+    async fn test_scrape_range_single_chunk() {
+        let mut server = Server::new_async().await;
+
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:1234567</identifier>
+                <datestamp>2024-01-01</datestamp>
+                <setSpec>mathematics</setSpec>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>Range Test Paper</dc:title>
+                    <dc:creator>Range, Alice</dc:creator>
+                    <dc:date>2024</dc:date>
+                    <dc:source>Range Journal</dc:source>
+                    <dc:identifier>zbMATH:1234567</dc:identifier>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+                Matcher::UrlEncoded("from".into(), "2024-01-01T00:00:00Z".into()),
+                Matcher::UrlEncoded("until".into(), "2024-01-03T00:00:00Z".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(mock_response)
+            .create_async()
+            .await;
+
+        // Test with a 2-day range (smaller than 7-day chunk size)
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 3, 0, 0, 0).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Range Test Paper");
+        assert_eq!(records[0].authors, vec!["Range, Alice"]);
+        assert_eq!(records[0].source, "zbmath");
+    }
+
+    /// Test scrape_range function with multiple chunks
+    #[tokio::test]
+    async fn test_scrape_range_multiple_chunks() {
+        let mut server = Server::new_async().await;
+
+        // First chunk response (Jan 1-7)
+        let first_chunk_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:1111111</identifier>
+                <datestamp>2024-01-01</datestamp>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>First Chunk Paper</dc:title>
+                    <dc:creator>Chunk, First</dc:creator>
+                    <dc:date>2024</dc:date>
+                    <dc:source>Chunk Journal</dc:source>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        // Second chunk response (Jan 8-14)
+        let second_chunk_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:2222222</identifier>
+                <datestamp>2024-01-08</datestamp>
+            </header>
+            <metadata>
+                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
+                          xmlns:dc="http://purl.org/dc/elements/1.1/">
+                    <dc:title>Second Chunk Paper</dc:title>
+                    <dc:creator>Chunk, Second</dc:creator>
+                    <dc:date>2024</dc:date>
+                    <dc:source>Chunk Journal</dc:source>
+                </oai_dc:dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        // Mock first chunk request (Jan 1-7)
+        let _mock1 = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+                Matcher::UrlEncoded("from".into(), "2024-01-01T00:00:00Z".into()),
+                Matcher::UrlEncoded("until".into(), "2024-01-08T00:00:00Z".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(first_chunk_response)
+            .create_async()
+            .await;
+
+        // Mock second chunk request (Jan 8-15)
+        let _mock2 = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+                Matcher::UrlEncoded("from".into(), "2024-01-08T00:00:00Z".into()),
+                Matcher::UrlEncoded("until".into(), "2024-01-15T00:00:00Z".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(second_chunk_response)
+            .create_async()
+            .await;
+
+        // Test with a 14-day range (should create 2 chunks of 7 days each)
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 15, 0, 0, 0).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].title, "First Chunk Paper");
+        assert_eq!(records[1].title, "Second Chunk Paper");
+    }
+
+    /// Test scrape_range function with empty results
+    #[tokio::test]
+    async fn test_scrape_range_empty_results() {
+        let mut server = Server::new_async().await;
+
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="noRecordsMatch">No records match the given criteria</error>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(400)
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    /// Test scrape_range function error handling
+    #[tokio::test]
+    async fn test_scrape_range_error_handling() {
+        let mut server = Server::new_async().await;
+
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="badArgument">Invalid date format</error>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(400)
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Bad API argument"));
+    }
+
+    /// Test scrape_range function with HTTP error
+    #[tokio::test]
+    async fn test_scrape_range_http_error() {
+        let mut server = Server::new_async().await;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("HTTP error 500"));
+    }
+
+    /// Test convert_to_publication_record with no metadata
+    #[test]
+    fn test_convert_to_publication_record_no_metadata() {
+        let record = Record {
+            header: RecordHeader {
+                identifier: "oai:zbmath.org:1234567".to_string(),
+                date_stamp: "2024-01-01".to_string(),
+                set_spec: vec![],
+            },
+            metadata: None, // No metadata
+        };
+
+        let result = convert_to_publication_record(record).unwrap();
+        assert!(result.is_none()); // Should return None for no metadata
+    }
+
+    /// Test convert_to_publication_record with venue field
+    #[test]
+    fn test_convert_to_publication_record_with_venue() {
+        let record = Record {
+            header: RecordHeader {
+                identifier: "oai:zbmath.org:1234567".to_string(),
+                date_stamp: "2024-01-01".to_string(),
+                set_spec: vec![],
+            },
+            metadata: Some(Metadata {
+                dc: DublinCore {
+                    contributor: None,
+                    creator: Some("Smith, John".to_string()),
+                    date: Some("2024".to_string()),
+                    identifier: Some("zbMATH:1234567".to_string()),
+                    language: Some("en".to_string()),
+                    publisher: Some("Academic Press".to_string()),
+                    relation: None,
+                    rights: None,
+                    source: Some("Journal of Advanced Mathematics".to_string()), // Has venue
+                    subject: Some("Mathematics".to_string()),
+                    title: Some("A Study of Graph Theory".to_string()),
+                    doc_type: Some("article".to_string()),
+                },
+            }),
+        };
+
+        let result = convert_to_publication_record(record).unwrap();
+        assert!(result.is_some());
+
+        let pub_record = result.unwrap();
+        assert_eq!(
+            pub_record.venue,
+            Some("Journal of Advanced Mathematics".to_string())
+        );
+    }
+
+    /// Test scrape_chunk with unknown API error code in HTTP error response
+    #[tokio::test]
+    async fn test_scrape_chunk_unknown_error_code_http() {
+        let mut server = Server::new_async().await;
+
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="someUnknownError">Some unknown error occurred</error>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(500) // HTTP error status
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("API error someUnknownError"));
+        assert!(error_msg.contains("Some unknown error occurred"));
+    }
+
+    /// Test scrape_chunk with unknown API error code in successful response
+    #[tokio::test]
+    async fn test_scrape_chunk_unknown_error_code_success() {
+        let mut server = Server::new_async().await;
+
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="someOtherUnknownError">Another unknown error occurred</error>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200) // HTTP success status but with error in content
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("API error someOtherUnknownError"));
+        assert!(error_msg.contains("Another unknown error occurred"));
+    }
+
+    /// Test scrape_chunk with empty response (no list_records element)
+    #[tokio::test]
+    async fn test_scrape_chunk_empty_response() {
+        let mut server = Server::new_async().await;
+
+        let empty_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(empty_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        // Should succeed with empty results when no list_records element
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    /// Test scrape_chunk with noRecordsMatch error in successful HTTP response
+    #[tokio::test]
+    async fn test_scrape_chunk_no_records_match_success_response() {
+        let mut server = Server::new_async().await;
+
+        let error_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <error code="noRecordsMatch">No records match the given criteria</error>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200) // HTTP success status but with noRecordsMatch error in content
+            .with_header("content-type", "text/xml")
+            .with_body(error_response)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        // Should succeed with empty results when noRecordsMatch in successful response
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    /// Test scrape_chunk with HTTP error but valid XML with no error element
+    #[tokio::test]
+    async fn test_scrape_chunk_http_error_no_xml_error() {
+        let mut server = Server::new_async().await;
+
+        let response_without_error = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(500) // HTTP error status
+            .with_header("content-type", "text/xml")
+            .with_body(response_without_error)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        // Should succeed with empty results - HTTP error with valid XML but no error element falls through to normal processing
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0); // Empty ListRecords should return no records
+    }
+
+    /// Test scrape_chunk with successful HTTP response but malformed XML
+    #[tokio::test]
+    async fn test_scrape_chunk_success_malformed_xml() {
+        let mut server = Server::new_async().await;
+
+        let malformed_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath.org:123</identifier>
+                <!-- Missing closing tag for header! -->
+        </record>
+    </ListRecords>
+<!-- Missing closing OAI-PMH tag! -->"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200) // HTTP success status
+            .with_header("content-type", "text/xml")
+            .with_body(malformed_xml)
+            .create_async()
+            .await;
+
+        let client = reqwest::Client::new();
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+
+        // Should fail with XML parsing error
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Failed to parse XML response"));
     }
 }
