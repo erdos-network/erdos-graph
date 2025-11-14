@@ -1,9 +1,131 @@
 #[cfg(test)]
 mod tests {
-    use crate::scrapers::zbmath::{DublinCore, Metadata, OaiPmh, Record, RecordHeader};
-    use crate::scrapers::zbmath::{convert_to_publication_record, scrape_chunk, scrape_range};
+    use crate::scrapers::zbmath::{scrape_range_with_config, scrape_chunk_with_config, convert_to_publication_record, ZbmathConfig};
+    use crate::scrapers::zbmath::{OaiPmh, Record, RecordHeader, Metadata, DublinCore};
     use chrono::{TimeZone, Utc};
     use mockito::{Matcher, Server};
+
+    // Helper function for testing scrape_range with mock server
+    async fn test_scrape_range_with_mock_url(
+        start: chrono::DateTime<Utc>,
+        end: chrono::DateTime<Utc>,
+        mock_url: &str,
+    ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
+        let config = ZbmathConfig {
+            base_url: mock_url.to_string(),
+            chunk_size_days: 7,
+            delay_between_chunks_ms: 1, // Fast for tests
+            delay_between_pages_ms: 1,  // Fast for tests
+        };
+        scrape_range_with_config(start, end, config).await
+    }
+
+    // Helper function for testing scrape_chunk with mock server
+    async fn test_scrape_chunk_with_mock_url(
+        client: &reqwest::Client,
+        start: chrono::DateTime<Utc>,
+        end: chrono::DateTime<Utc>,
+        mock_url: &str,
+    ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
+        let config = ZbmathConfig {
+            base_url: mock_url.to_string(),
+            chunk_size_days: 7,
+            delay_between_chunks_ms: 1,
+            delay_between_pages_ms: 1,
+        };
+        scrape_chunk_with_config(client, start, end, &config).await
+    }
+
+    /// Test ZbmathConfig Default implementation
+    #[test]
+    fn test_zbmath_config_default() {
+        let config = ZbmathConfig::default();
+        
+        assert_eq!(config.base_url, "https://oai.zbmath.org/v1/");
+        assert_eq!(config.chunk_size_days, 7);
+        assert_eq!(config.delay_between_chunks_ms, 1000);
+        assert_eq!(config.delay_between_pages_ms, 500);
+    }
+
+    /// Test ZbmathConfig custom configuration
+    #[test]
+    fn test_zbmath_config_custom() {
+        let config = ZbmathConfig {
+            base_url: "https://custom-zbmath.example.com/".to_string(),
+            chunk_size_days: 14,
+            delay_between_chunks_ms: 2000,
+            delay_between_pages_ms: 1000,
+        };
+        
+        assert_eq!(config.base_url, "https://custom-zbmath.example.com/");
+        assert_eq!(config.chunk_size_days, 14);
+        assert_eq!(config.delay_between_chunks_ms, 2000);
+        assert_eq!(config.delay_between_pages_ms, 1000);
+    }
+
+    /// Test ZbmathConfig Clone implementation
+    #[test]
+    fn test_zbmath_config_clone() {
+        let config1 = ZbmathConfig::default();
+        let config2 = config1.clone();
+        
+        assert_eq!(config1.base_url, config2.base_url);
+        assert_eq!(config1.chunk_size_days, config2.chunk_size_days);
+        assert_eq!(config1.delay_between_chunks_ms, config2.delay_between_chunks_ms);
+        assert_eq!(config1.delay_between_pages_ms, config2.delay_between_pages_ms);
+    }
+
+    /// Test the new configuration-based API
+    #[tokio::test]
+    async fn test_zbmath_config_api() {
+        let mut server = Server::new_async().await;
+        
+        let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+    <ListRecords>
+        <record>
+            <header>
+                <identifier>oai:zbmath:1234567</identifier>
+                <datestamp>2024-01-01T00:00:00Z</datestamp>
+            </header>
+            <metadata>
+                <dc xmlns="http://purl.org/dc/elements/1.1/">
+                    <title>Test Configuration Paper</title>
+                    <creator>Config, Test</creator>
+                    <date>2024</date>
+                    <source>Journal of Config Testing</source>
+                </dc>
+            </metadata>
+        </record>
+    </ListRecords>
+</OAI-PMH>"#;
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
+                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(mock_response)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+        
+        // Test the new config-based API
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Test Configuration Paper");
+        assert_eq!(records[0].authors, vec!["Config, Test"]);
+        assert_eq!(records[0].year, 2024);
+        assert_eq!(records[0].source, "zbmath");
+    }
 
     /// Test scraping zbMATH publications in a date range using mocked API.
     ///
@@ -68,9 +190,9 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 3, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         assert!(result.is_ok());
         let records = result.unwrap();
         assert_eq!(records.len(), 2);
@@ -107,9 +229,9 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(); // Same start and end
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         // Should succeed with empty results when no records match
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -163,9 +285,9 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         assert!(result.is_ok());
         let records = result.unwrap();
         assert_eq!(records.len(), 1);
@@ -428,9 +550,9 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("HTTP error 500"));
@@ -461,9 +583,9 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         // This should succeed with empty results, not error
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -495,9 +617,9 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Bad API argument"));
@@ -582,9 +704,9 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         assert!(result.is_ok());
         let records = result.unwrap();
         assert_eq!(records.len(), 2); // Should have both records from both pages
@@ -665,9 +787,9 @@ mod tests {
         // Test with a 2-day range (smaller than 7-day chunk size)
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 3, 0, 0, 0).unwrap();
-
-        let result = scrape_range(start, end, &server.url()).await;
-
+        
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        
         assert!(result.is_ok());
         let records = result.unwrap();
         assert_eq!(records.len(), 1);
@@ -758,9 +880,9 @@ mod tests {
         // Test with a 14-day range (should create 2 chunks of 7 days each)
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 15, 0, 0, 0).unwrap();
-
-        let result = scrape_range(start, end, &server.url()).await;
-
+        
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        
         assert!(result.is_ok());
         let records = result.unwrap();
         assert_eq!(records.len(), 2);
@@ -792,9 +914,9 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_range(start, end, &server.url()).await;
-
+        
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        
         assert!(result.is_ok());
         let records = result.unwrap();
         assert_eq!(records.len(), 0);
@@ -824,9 +946,9 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_range(start, end, &server.url()).await;
-
+        
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Bad API argument"));
@@ -850,9 +972,9 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_range(start, end, &server.url()).await;
-
+        
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("HTTP error 500"));
@@ -936,9 +1058,15 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+<<<<<<< HEAD
 
         let result = scrape_chunk(&client, start, end, &server.url()).await;
 
+=======
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
+>>>>>>> e30ba6a (add ZbmathConfig struct and add tests for all but scrape_range function to ensure maximum coverage; added tests in examples folder)
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("API error someUnknownError"));
@@ -970,9 +1098,15 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+<<<<<<< HEAD
 
         let result = scrape_chunk(&client, start, end, &server.url()).await;
 
+=======
+        
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
+>>>>>>> e30ba6a (add ZbmathConfig struct and add tests for all but scrape_range function to ensure maximum coverage; added tests in examples folder)
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("API error someOtherUnknownError"));
@@ -1003,9 +1137,8 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         // Should succeed with empty results when no list_records element
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1037,9 +1170,8 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         // Should succeed with empty results when noRecordsMatch in successful response
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1072,9 +1204,8 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         // Should succeed with empty results - HTTP error with valid XML but no error element falls through to normal processing
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1112,9 +1243,8 @@ mod tests {
         let client = reqwest::Client::new();
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
-
-        let result = scrape_chunk(&client, start, end, &server.url()).await;
-
+        let result = test_scrape_chunk_with_mock_url(&client, start, end, &server.url()).await;
+        
         // Should fail with XML parsing error
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();

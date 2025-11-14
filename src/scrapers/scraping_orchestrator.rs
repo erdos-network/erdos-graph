@@ -101,12 +101,7 @@ pub async fn run_chunk(
     let records = match source {
         "arxiv" => arxiv::scrape_range(start_date, end_date)?,
         "dblp" => dblp::scrape_range(start_date, end_date)?,
-        #[cfg(not(test))]
         "zbmath" => zbmath::scrape_range(start_date, end_date).await?,
-        #[cfg(test)]
-        "zbmath" => {
-            zbmath::scrape_range(start_date, end_date, "https://oai.zbmath.org/v1/").await?
-        }
         _ => return Err("Unknown source".into()),
     };
 

@@ -8,6 +8,25 @@ use tokio::time::sleep;
 #[cfg(not(test))]
 const ZBMATH_BASE_URL: &str = "https://oai.zbmath.org/v1/";
 
+#[derive(Clone, Debug)]
+pub struct ZbmathConfig {
+    pub base_url: String,
+    pub chunk_size_days: i64,
+    pub delay_between_chunks_ms: u64,
+    pub delay_between_pages_ms: u64,
+}
+
+impl Default for ZbmathConfig {
+    fn default() -> Self {
+        Self {
+            base_url: ZBMATH_BASE_URL.to_string(),
+            chunk_size_days: 7,
+            delay_between_chunks_ms: 1000,
+            delay_between_pages_ms: 500,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub(crate) struct OaiPmh {
@@ -121,17 +140,21 @@ pub(crate) struct OaiError {
 /// println!("Found {} publications", records.len());
 /// ```
 /// Scrapes publication records from zbMATH for a given date range.
-#[allow(unused_variables)]
 pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    #[cfg(test)] base_url: &str,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    #[cfg(not(test))]
-    let base_url = ZBMATH_BASE_URL;
+    scrape_range_with_config(start_date, end_date, ZbmathConfig::default()).await
+}
 
-    // Use 7-day chunks to keep requests manageable
-    let chunk_size = Duration::days(7);
+/// Scrapes publication records from zbMATH with custom configuration.
+pub async fn scrape_range_with_config(
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
+    config: ZbmathConfig,
+) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+    // Use configurable chunk size
+    let chunk_size = Duration::days(config.chunk_size_days);
     let chunks = generate_chunks(start_date, end_date, chunk_size);
 
     let mut all_records = Vec::new();
@@ -154,21 +177,15 @@ pub async fn scrape_range(
         );
 
         // Scrape this chunk with pagination
-        let chunk_records = scrape_chunk(
-            &client,
-            *chunk_start,
-            *chunk_end,
-            #[cfg(test)]
-            base_url,
-        )
-        .await?;
+        let chunk_records =
+            scrape_chunk_with_config(&client, *chunk_start, *chunk_end, &config).await?;
         println!("Found {} records in chunk {}", chunk_records.len(), i + 1);
 
         all_records.extend(chunk_records);
 
-        // Be respectful to the API - wait 1 second between chunks
+        // Be respectful to the API - wait between chunks
         if i < chunks.len() - 1 {
-            sleep(StdDuration::from_secs(1)).await;
+            sleep(StdDuration::from_millis(config.delay_between_chunks_ms)).await;
         }
     }
 
@@ -176,16 +193,15 @@ pub async fn scrape_range(
     Ok(all_records)
 }
 
-/// Scrapes a single date chunk, handling pagination with resumption tokens.
-#[allow(unused_variables)]
-pub(crate) async fn scrape_chunk(
+
+
+/// Scrapes a single date chunk with custom configuration.
+pub async fn scrape_chunk_with_config(
     client: &reqwest::Client,
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    #[cfg(test)] base_url: &str,
+    config: &ZbmathConfig,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    #[cfg(not(test))]
-    let base_url = ZBMATH_BASE_URL;
     let mut all_records = Vec::new();
     let mut resumption_token: Option<String> = None;
 
@@ -205,7 +221,7 @@ pub(crate) async fn scrape_chunk(
         }
 
         let response = client
-            .get(base_url)
+            .get(&config.base_url)
             .query(&params)
             .header("accept", "text/xml")
             .send()
@@ -275,7 +291,7 @@ pub(crate) async fn scrape_chunk(
             }
 
             // Small delay between paginated requests
-            sleep(StdDuration::from_millis(500)).await;
+            sleep(StdDuration::from_millis(config.delay_between_pages_ms)).await;
         } else {
             // No list_records element - we're done
             break;
