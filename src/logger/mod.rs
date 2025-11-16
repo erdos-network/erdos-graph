@@ -18,9 +18,6 @@ pub mod core;
 
 pub use core::{LogLevel, Logger, NoopLogger, StdoutLogger};
 
-#[cfg(test)]
-pub mod tests;
-
 /// Global logger facade.
 /// A process-wide logger reference used by the convenience facade below.
 ///
@@ -42,12 +39,11 @@ static mut GLOBAL_LOGGER: Option<&'static dyn Logger> = None;
 /// Returns a guard-like value in the future; for now this sets a static.
 pub fn init_logger<L: Logger>(logger: L) {
     // Leak the logger so it can be referenced via a static pointer safely.
-    // This is a deliberate choice for a global singleton with program lifetime.
     let boxed: Box<dyn Logger> = Box::new(logger);
     let leaked: &'static dyn Logger = Box::leak(boxed);
     unsafe {
-        GLOBAL_LOGGER = Some(leaked);
-    }
+		GLOBAL_LOGGER = Some(leaked);
+	}
 }
 
 /// For tests: set a logger that will be used by the global facade.
@@ -75,4 +71,9 @@ pub fn debug(msg: &str) {
 
 pub fn error(msg: &str) {
     log(LogLevel::Error, msg);
+}
+
+#[cfg(test)]
+mod tests {
+
 }

@@ -18,6 +18,9 @@
 //! need dynamically-swappable global loggers, add synchronization around the
 //! global facade and consider weaker bounds.
 
+use std::any::Any;
+use std::os::fd::{AsFd, AsRawFd};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Trace,
@@ -27,8 +30,8 @@ pub enum LogLevel {
     Error,
 }
 
+/// Returns a short string representation suitable for logs.
 impl LogLevel {
-    /// Return a short string representation suitable for logs.
     pub fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Trace => "TRACE",
@@ -42,38 +45,38 @@ impl LogLevel {
 
 /// Minimal logger interface used throughout the project.
 ///
-/// Implementors must satisfy `Send + Sync + 'static` which allows boxed trait
-/// objects to be stored in globals and referenced across threads. The core
+/// Must be `Send + Sync + 'static` for global usage.
+/// The core
 /// requirement is a single `log` method; convenience helpers like `info` and
 /// `warn` are implemented in terms of `log` so tests can provide a tiny
 /// implementation without implementing all helpers.
 pub trait Logger: Send + Sync + 'static {
     /// Emit a log record at the given level.
-    fn log(&self, level: LogLevel, message: &str);
+    fn log(&self, _level: LogLevel, _message: &str) {}
 
     /// Flush any buffered records.
     fn flush(&self) {}
 
-    /// Convenience: trace level.
+    /// Convenience methods
     fn trace(&self, message: &str) {
         self.log(LogLevel::Trace, message);
     }
-    /// Convenience: debug level.
     fn debug(&self, message: &str) {
         self.log(LogLevel::Debug, message);
     }
-    /// Convenience: info level.
     fn info(&self, message: &str) {
         self.log(LogLevel::Info, message);
     }
-    /// Convenience: warn level.
     fn warn(&self, message: &str) {
         self.log(LogLevel::Warn, message);
     }
-    /// Convenience: error level.
     fn error(&self, message: &str) {
         self.log(LogLevel::Error, message);
     }
+
+    /// Downcasting helpers
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 /// No-op logger used by default in tests and when logging is disabled.
@@ -86,8 +89,10 @@ pub struct NoopLogger;
 
 impl Logger for NoopLogger {
     fn log(&self, _level: LogLevel, _message: &str) {
-        // intentionally no-op
+        // intentionally do nothing
     }
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
 }
 
 /// Very small stdout logger for quick debugging.
@@ -101,11 +106,11 @@ impl Logger for NoopLogger {
 pub struct StdoutLogger;
 
 impl Logger for StdoutLogger {
+    // Emit a small JSON object to stdout so logs are easier to parse
+    // by structured log collectors. Keep the shape minimal for now.
+    // Example: {"ts":"...","level":"INFO","msg":"..."}
     fn log(&self, level: LogLevel, message: &str) {
-        // Emit a small JSON object to stdout so logs are easier to parse
-        // by structured log collectors. Keep the shape minimal for now.
         let ts = chrono::Utc::now().to_rfc3339();
-        // Example: {"ts":"...","level":"INFO","msg":"..."}
         let json = serde_json::json!({
             "ts": ts,
             "level": level.as_str(),
@@ -116,5 +121,135 @@ impl Logger for StdoutLogger {
 
     fn flush(&self) {
         // stdout is line-buffered; nothing to do for the stub
+    }
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== LogLevel tests ==========
+
+    #[test]
+    fn test_loglevel_as_str_success() {
+        assert_eq!(LogLevel::Trace.as_str(), "TRACE");
+        assert_eq!(LogLevel::Debug.as_str(), "DEBUG");
+        assert_eq!(LogLevel::Info.as_str(), "INFO");
+        assert_eq!(LogLevel::Warn.as_str(), "WARN");
+        assert_eq!(LogLevel::Error.as_str(), "ERROR");
+    }
+
+    #[test]
+    fn test_loglevel_ordering_is_monotonic() {
+        assert!(LogLevel::Trace < LogLevel::Debug);
+        assert!(LogLevel::Debug < LogLevel::Info);
+        assert!(LogLevel::Info < LogLevel::Warn);
+        assert!(LogLevel::Warn < LogLevel::Error);
+    }
+
+    // edge case: ensure different variants are actually unequal
+    #[test]
+    fn test_loglevel_not_equal() {
+        assert_ne!(LogLevel::Info, LogLevel::Error);
+    }
+
+    // ========== NoopLogger tests ==========
+
+    #[test]
+    fn test_nooplogger_accepts_all_levels() {
+        let logger = NoopLogger;
+        logger.trace("trace");
+        logger.debug("debug");
+        logger.info("info");
+        logger.warn("warn");
+        logger.error("error");
+        logger.flush();
+        assert!(true);
+    }
+
+    // ========== StdoutLogger tests ==========
+
+    fn capture_stdout<F: FnOnce()>(f: F) -> String {
+        use std::io::Read;
+
+        let mut reader = tempfile::tempfile().unwrap();
+        let writer = reader.try_clone().unwrap();
+
+        let saved = unsafe { libc::dup(libc::STDOUT_FILENO) };
+        unsafe { libc::dup2(writer.as_fd().as_raw_fd(), libc::STDOUT_FILENO) };
+
+        f();
+
+        unsafe { libc::dup2(saved, libc::STDOUT_FILENO) };
+        unsafe { libc::close(saved) };
+
+        let mut output = String::new();
+        reader.read_to_string(&mut output).unwrap();
+        output
+    }
+
+    #[test]
+    fn test_stdoutlogger_prints_json_success() {
+        let out = capture_stdout(|| {
+            StdoutLogger.log(LogLevel::Info, "hello");
+        });
+
+        assert!(out.contains("\"level\":\"INFO\""));
+        assert!(out.contains("\"msg\":\"hello\""));
+    }
+
+    #[test]
+    fn test_stdoutlogger_prints_different_level() {
+        let out = capture_stdout(|| {
+            StdoutLogger.log(LogLevel::Error, "bad");
+        });
+
+        assert!(out.contains("\"level\":\"ERROR\""));
+        assert!(out.contains("\"msg\":\"bad\""));
+    }
+
+    #[test]
+    fn test_stdoutlogger_flush_noop() {
+        StdoutLogger.flush();
+        assert!(true);
+    }
+
+    // ========== Logger trait default methods ==========
+
+    #[derive(Default)]
+    struct TestLogger {
+        pub entries: std::sync::Mutex<Vec<(LogLevel, String)>>,
+    }
+
+    impl Logger for TestLogger {
+        fn log(&self, level: LogLevel, msg: &str) {
+            self.entries.lock().unwrap().push((level, msg.to_string()));
+        }
+        fn as_any(&self) -> &dyn Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    }
+
+    #[test]
+    fn test_trait_default_methods_success() {
+        let logger = TestLogger::default();
+        logger.info("info");
+        logger.warn("warn");
+
+        let entries = logger.entries.lock().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, LogLevel::Info);
+        assert_eq!(entries[0].1, "info");
+    }
+
+    // Edge case: empty message
+    #[test]
+    fn test_trait_handles_empty_message() {
+        let logger = TestLogger::default();
+        logger.info("");
+
+        let entries = logger.entries.lock().unwrap();
+        assert_eq!(entries[0].1, "");
     }
 }
