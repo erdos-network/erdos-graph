@@ -100,8 +100,8 @@ pub async fn run_chunk(
     // Dispatch to the appropriate scraper
     let records = match source {
         "arxiv" => arxiv::scrape_range(start_date, end_date)?,
-        "dblp" => dblp::scrape_range(start_date, end_date).await?,
-        "zbmath" => zbmath::scrape_range(start_date, end_date)?,
+        "dblp" => dblp::scrape_range(start_date, end_date)?,
+        "zbmath" => zbmath::scrape_range(start_date, end_date).await?,
         _ => return Err("Unknown source".into()),
     };
 

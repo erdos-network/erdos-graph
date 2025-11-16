@@ -6,9 +6,11 @@
 //! - Publication ingestion and deduplication
 //! - Graph schema definition (Person and Publication vertices, AUTHORED edges)
 //! - Checkpointing for incremental scraping
+//! - Thread-safe Ingestion queue for publications
 
 pub mod client;
 pub mod ingestion;
+pub mod ingestion_queue;
 pub mod schema;
 
 #[cfg(test)]
