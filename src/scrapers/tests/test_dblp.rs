@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::scrapers::dblp;
     use crate::db::ingestion::PublicationRecord;
+    use crate::scrapers::dblp;
     use chrono::{TimeZone, Utc};
 
     /// Helper function to create a sample DBLP XML fragment for testing parsing
@@ -41,13 +41,13 @@ mod tests {
         let end = Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
 
         let result = dblp::scrape_range(start, end).await;
-        
+
         // Currently returns empty vec due to todo!() in parse_dblp_entry
         match result {
             Ok(records) => {
                 // With current implementation, expect empty results due to todo!()
                 println!("DBLP scraper returned {} records", records.len());
-                
+
                 // If records are returned, verify they have correct structure
                 for record in &records {
                     assert_eq!(record.source, "dblp");
@@ -58,7 +58,10 @@ mod tests {
             }
             Err(e) => {
                 // Network failures are acceptable in CI environments
-                eprintln!("DBLP scraper test failed (likely due to todo!() or network): {}", e);
+                eprintln!(
+                    "DBLP scraper test failed (likely due to todo!() or network): {}",
+                    e
+                );
             }
         }
     }
@@ -70,11 +73,15 @@ mod tests {
         let end = start; // Empty range
 
         let result = dblp::scrape_range(start, end).await;
-        
+
         match result {
             Ok(records) => {
                 // Empty range should return empty results
-                assert_eq!(records.len(), 0, "Empty date range should return no records");
+                assert_eq!(
+                    records.len(),
+                    0,
+                    "Empty date range should return no records"
+                );
             }
             Err(e) => {
                 // Network/parsing failures are acceptable
@@ -91,11 +98,15 @@ mod tests {
         let end = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
 
         let result = dblp::scrape_range(start, end).await;
-        
+
         match result {
             Ok(records) => {
                 // Invalid range should return empty results
-                assert_eq!(records.len(), 0, "Invalid date range should return no records");
+                assert_eq!(
+                    records.len(),
+                    0,
+                    "Invalid date range should return no records"
+                );
             }
             Err(e) => {
                 eprintln!("Invalid range test failed: {}", e);
@@ -107,11 +118,11 @@ mod tests {
     #[test]
     fn test_parse_dblp_article() {
         let _xml = create_sample_dblp_xml();
-        
+
         // This will fail until parse_dblp_entry is implemented
         // let result = dblp::parse_dblp_entry(xml);
         // assert!(result.is_ok());
-        
+
         // let record = result.unwrap();
         // assert_eq!(record.id, "journals/jacm/Smith21");
         // assert_eq!(record.title, "Advanced Graph Algorithms for Large Networks");
@@ -125,11 +136,11 @@ mod tests {
     #[test]
     fn test_parse_dblp_inproceedings() {
         let _xml = create_sample_dblp_inproceedings_xml();
-        
+
         // This will fail until parse_dblp_entry is implemented
         // let result = dblp::parse_dblp_entry(xml);
         // assert!(result.is_ok());
-        
+
         // let record = result.unwrap();
         // assert_eq!(record.id, "conf/icml/DoeSmith22");
         // assert_eq!(record.title, "Machine Learning on Graph Structures");
@@ -154,8 +165,8 @@ mod tests {
         let invalid_keys = vec![
             "",
             "invalid-key",
-            "conf/icml",  // Missing author/year
-            "journals/",  // Incomplete
+            "conf/icml", // Missing author/year
+            "journals/", // Incomplete
         ];
 
         for _key in valid_keys {
@@ -173,10 +184,10 @@ mod tests {
     #[test]
     fn test_dblp_malformed_xml() {
         let malformed_xml_cases = vec![
-            "", // Empty string
-            "<article>", // Unclosed tag
-            "<article><title>Test</title>", // Missing closing tag
-            "<invalid>Not a DBLP entry</invalid>", // Wrong root element
+            "",                                                            // Empty string
+            "<article>",                                                   // Unclosed tag
+            "<article><title>Test</title>",                                // Missing closing tag
+            "<invalid>Not a DBLP entry</invalid>",                         // Wrong root element
             r#"<article key="test"><author>&invalid;</author></article>"#, // Invalid entity
         ];
 
@@ -243,7 +254,7 @@ mod tests {
     fn test_dblp_year_filtering() {
         // The current implementation extracts year from mdate attribute
         // This test would verify the year filtering works correctly
-        
+
         // TODO: Test that records are correctly filtered by publication year
         // This requires mocking or controlling the XML parsing process
     }
@@ -256,10 +267,13 @@ mod tests {
         let end = Utc.with_ymd_and_hms(2020, 2, 1, 0, 0, 0).unwrap();
 
         let result = dblp::scrape_range(start, end).await;
-        
+
         match result {
             Ok(records) => {
-                println!("Successfully processed DBLP data, found {} records", records.len());
+                println!(
+                    "Successfully processed DBLP data, found {} records",
+                    records.len()
+                );
                 // Verify we can handle reasonably large result sets
                 // (Though current implementation likely returns empty due to todo!())
             }
@@ -278,7 +292,7 @@ mod tests {
         let end = Utc.with_ymd_and_hms(1900, 1, 2, 0, 0, 0).unwrap();
 
         let result = dblp::scrape_range(start, end).await;
-        
+
         // The function should handle network errors gracefully
         match result {
             Ok(_) => {
@@ -298,7 +312,7 @@ mod tests {
 
     /// Test concurrent access (if needed in the future)
     #[tokio::test]
-    async fn test_dblp_concurrent_scraping() {        
+    async fn test_dblp_concurrent_scraping() {
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
 
@@ -316,21 +330,25 @@ mod tests {
     #[test]
     fn test_dblp_parsing_performance() {
         use std::time::Instant;
-        
+
         let _xml = create_sample_dblp_xml();
         let iterations = 1000;
-        
+
         let start = Instant::now();
-        
+
         for _ in 0..iterations {
             // TODO: Benchmark parsing performance once implemented
             // let _ = dblp::parse_dblp_entry(xml);
         }
-        
+
         let duration = start.elapsed();
-        println!("Parsed {} records in {:?} ({:.2} records/sec)", 
-                iterations, duration, iterations as f64 / duration.as_secs_f64());
-                
+        println!(
+            "Parsed {} records in {:?} ({:.2} records/sec)",
+            iterations,
+            duration,
+            iterations as f64 / duration.as_secs_f64()
+        );
+
         // Should be able to parse at least 100 records per second
         // assert!(duration.as_secs_f64() < iterations as f64 / 100.0);
     }
@@ -343,33 +361,40 @@ mod tests {
         let end = Utc.with_ymd_and_hms(2024, 1, 7, 0, 0, 0).unwrap(); // 1 week
 
         println!("Testing DBLP integration with 1-week sample from 2024");
-        
+
         let result = dblp::scrape_range(start, end).await;
-        
+
         match result {
             Ok(records) => {
                 println!("Successfully retrieved {} DBLP records", records.len());
-                
+
                 if !records.is_empty() {
                     // Test data quality on a few sample records
                     let sample_size = std::cmp::min(5, records.len());
-                    
+
                     for (i, record) in records.iter().take(sample_size).enumerate() {
-                        println!("Sample {}: {} by {:?} ({})", 
-                                i + 1, record.title, record.authors, record.year);
-                        
+                        println!(
+                            "Sample {}: {} by {:?} ({})",
+                            i + 1,
+                            record.title,
+                            record.authors,
+                            record.year
+                        );
+
                         // Basic validation
                         assert!(!record.id.is_empty());
                         assert!(!record.title.is_empty());
                         assert!(!record.authors.is_empty());
                         assert!(record.year >= 2020 && record.year <= 2030);
                         assert_eq!(record.source, "dblp");
-                        
+
                         // DBLP IDs should follow pattern like "conf/venue/AuthorYear" or "journals/venue/AuthorYear"
                         assert!(record.id.contains("/") || record.id.starts_with("dblp:"));
                     }
                 } else {
-                    println!("No records found for the test period - this may be normal for very narrow date ranges");
+                    println!(
+                        "No records found for the test period - this may be normal for very narrow date ranges"
+                    );
                 }
             }
             Err(e) => {

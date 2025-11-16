@@ -1,8 +1,8 @@
 use crate::db::ingestion::PublicationRecord;
 use chrono::{DateTime, Datelike, Utc};
 use flate2::read::GzDecoder;
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 use reqwest::Client;
 use std::io::{BufRead, BufReader, Cursor};
 
@@ -163,7 +163,10 @@ fn parse_dblp_element<R: BufRead>(
     Ok(Some(PublicationRecord {
         id: key.to_string(),
         title: title.trim().to_string(),
-        authors: authors.into_iter().map(|a: String| a.trim().to_string()).collect(),
+        authors: authors
+            .into_iter()
+            .map(|a: String| a.trim().to_string())
+            .collect(),
         year: year.unwrap(),
         venue,
         source: "dblp".to_string(),
