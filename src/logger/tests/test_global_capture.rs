@@ -1,4 +1,4 @@
-use super::super::logger::{init_logger, log, LogLevel, Logger};
+use crate::logger::{LogLevel, Logger, init_logger, log};
 use std::sync::{Arc, Mutex};
 
 struct CapturingLogger {

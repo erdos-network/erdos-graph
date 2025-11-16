@@ -1,4 +1,4 @@
-use super::super::logger::{init_logger, log, LogLevel, NoopLogger, StdoutLogger};
+use crate::logger::{LogLevel, NoopLogger, StdoutLogger, init_logger, log};
 
 #[test]
 fn global_facade_noop_by_default() {

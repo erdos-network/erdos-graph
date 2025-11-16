@@ -1,14 +1,22 @@
 //! Custom logging primitives for the Erdős Graph project.
 //!
+//! This module provides a tiny, purposely minimal logging surface used by the
+//! codebase. The goals are to remain dependency-light while offering a
+//! consistently-typed `LogLevel` and a `Logger` trait that is easy to implement
+//! in tests and small binaries. For production-grade structured logging or
+//! filtering, replace or wrap these primitives with a more featureful logger
+//! (for example `tracing` or `log` + `env_logger`).
+//!
 //! Responsibilities:
 //! - Provide a lightweight `Logger` trait used across crates
 //! - Offer a baseline no-op implementation for tests and benchmarking
 //! - Centralize log level semantics without pulling a full logging framework
 //!
-//! TODOs:
-//! - Add an environment-configurable global logger facade
-//! - Add structured fields (key=value) support
-//! - Add async, buffered writer with backpressure and flush control
+//! Notes on thread-safety and bounds:
+//! Implementors of `Logger` must be `Send + Sync + 'static` so the trait
+//! objects can be stored in global contexts and shared between threads. If you
+//! need dynamically-swappable global loggers, add synchronization around the
+//! global facade and consider weaker bounds.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -34,13 +42,11 @@ impl LogLevel {
 
 /// Minimal logger interface used throughout the project.
 ///
-/// Implementors should be cheap to clone and thread-safe if used in multithreaded contexts.
-/// For stubs, implement `log` and optionally override convenience methods.
-/// TODO: consider adding `Send + Sync` bounds once we finalize the threading model.
-/// The logger trait used across the project.
-///
-/// Implementations must be `Send + Sync` so they can be shared across threads
-/// when the global facade is used.
+/// Implementors must satisfy `Send + Sync + 'static` which allows boxed trait
+/// objects to be stored in globals and referenced across threads. The core
+/// requirement is a single `log` method; convenience helpers like `info` and
+/// `warn` are implemented in terms of `log` so tests can provide a tiny
+/// implementation without implementing all helpers.
 pub trait Logger: Send + Sync + 'static {
     /// Emit a log record at the given level.
     fn log(&self, level: LogLevel, message: &str);
@@ -71,6 +77,10 @@ pub trait Logger: Send + Sync + 'static {
 }
 
 /// No-op logger used by default in tests and when logging is disabled.
+///
+/// `NoopLogger` implements `Logger` but drops all messages. It's useful in
+/// unit tests where you want to assert behavior without emitting output. The
+/// type is `Copy + Default` to make it lightweight to pass around.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopLogger;
 
@@ -83,7 +93,10 @@ impl Logger for NoopLogger {
 /// Very small stdout logger for quick debugging.
 ///
 /// NOTE: This is a stub and formatting is intentionally minimal.
-/// TODO: Add timestamps and consistent formatting; gate by minimum level.
+/// It writes a compact JSON object to stdout with a timestamp, level and message.
+/// The implementation intentionally uses `chrono` and `serde_json` for simplicity
+/// and should be replaced or augmented for production use (filtering, batching,
+/// and non-blocking IO are not supported).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StdoutLogger;
 
