@@ -34,7 +34,7 @@ use indradb::{Database, Datastore};
 /// - Scraping errors from individual sources
 /// - Database ingestion errors
 #[coverage(off)]
-pub fn run_scrape(
+pub async fn run_scrape(
     mode: &str,
     start_date: Option<DateTime<Utc>>,
     end_date: Option<DateTime<Utc>>,
@@ -63,7 +63,7 @@ pub fn run_scrape(
 
         // Process each chunk and update checkpoint after success
         for (chunk_start, chunk_end) in chunks {
-            run_chunk(src, chunk_start, chunk_end, datastore)?;
+            run_chunk(src, chunk_start, chunk_end, datastore).await?;
             set_checkpoint(src, chunk_end)?;
         }
     }
@@ -91,7 +91,7 @@ pub fn run_scrape(
 /// - Scraping errors (network, parsing, API limits)
 /// - Database ingestion errors
 #[coverage(off)]
-pub fn run_chunk(
+pub async fn run_chunk(
     source: &str,
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
@@ -100,7 +100,7 @@ pub fn run_chunk(
     // Dispatch to the appropriate scraper
     let records = match source {
         "arxiv" => arxiv::scrape_range(start_date, end_date)?,
-        "dblp" => dblp::scrape_range(start_date, end_date)?,
+        "dblp" => dblp::scrape_range(start_date, end_date).await?,
         "zbmath" => zbmath::scrape_range(start_date, end_date)?,
         _ => return Err("Unknown source".into()),
     };
