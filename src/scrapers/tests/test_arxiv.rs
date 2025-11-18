@@ -1,15 +1,18 @@
-use crate::scrapers::arxiv;
-use chrono::{TimeZone, Utc};
-use wiremock::matchers::query_param;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
-/// Deterministic test for `scrape_range_async` using a local mock HTTP server.
-///
-/// The test mounts a canned Atom XML feed on a mock server and points the
-/// scraper at it by setting `ARXIV_API_BASE`. This keeps the test fully
-/// deterministic and offline.
-#[tokio::test]
-async fn test_arxiv_scrape_range() {
+#[cfg(test)]
+mod tests {
+    use crate::scrapers::arxiv;
+    use chrono::{TimeZone, Utc};
+    use wiremock::matchers::query_param;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Deterministic test for `scrape_range_async` using a local mock HTTP server.
+    ///
+    /// The test mounts a canned Atom XML feed on a mock server and points the
+    /// scraper at it by setting `ARXIV_API_BASE`. This keeps the test fully
+    /// deterministic and offline.
+    #[tokio::test]
+    async fn test_arxiv_scrape_range() {
     // Start a mock server
     let mock_server = MockServer::start().await;
 
@@ -68,8 +71,10 @@ async fn test_arxiv_scrape_range() {
     }
 }
 
-#[tokio::test]
-async fn test_pagination_multiple_pages() {
+    /// Test: pagination across multiple pages; ensures scraper fetches pages
+    /// until an empty page signals the end and aggregates results.
+    #[tokio::test]
+    async fn test_pagination_multiple_pages() {
     let mock_server = MockServer::start().await;
 
     // Page 0: one entry
@@ -138,8 +143,52 @@ async fn test_pagination_multiple_pages() {
     assert!(titles.contains(&"Page Two"));
 }
 
-#[tokio::test]
-async fn test_empty_feed_returns_empty() {
+// Test: when start_date is after end_date the scraper should return an
+// empty result set (no panic or error) — the date window is treated as
+// empty and no entries fall inside it.
+    /// Test: inverted date range (start > end) should return an empty set
+    /// without error.
+    #[tokio::test]
+    async fn test_invalid_date_range_start_greater_than_end() {
+    let mock_server = MockServer::start().await;
+
+    let feed = r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/4000.0000v1</id>
+    <published>2025-10-01T00:00:00Z</published>
+    <title>Should Not Appear</title>
+    <author><name>Nobody</name></author>
+  </entry>
+</feed>"#;
+
+    Mock::given(method("GET"))
+        .and(path("/api/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(feed))
+        .mount(&mock_server)
+        .await;
+
+    let cfg = arxiv::ArxivConfig {
+        base_url: format!("{}/api/query", mock_server.uri()),
+        page_size: 100,
+        channel_size: 2,
+        delay_ms: 1,
+    };
+
+    // Intentionally inverted range: start after end
+    let start = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
+    let end = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
+
+    let records = arxiv::scrape_range_with_config_async(start, end, cfg)
+        .await
+        .unwrap();
+
+    assert!(records.is_empty(), "expected no records for inverted range");
+}
+
+    /// Test: empty feed returns an empty result vector.
+    #[tokio::test]
+    async fn test_empty_feed_returns_empty() {
     let mock_server = MockServer::start().await;
 
     let empty_feed = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -167,8 +216,10 @@ async fn test_empty_feed_returns_empty() {
     assert!(records.is_empty());
 }
 
-#[tokio::test]
-async fn test_truncated_feed_returns_error() {
+    /// Test: truncated/malformed feed either returns no records or an error,
+    /// but should not panic.
+    #[tokio::test]
+    async fn test_truncated_feed_returns_error() {
     let mock_server = MockServer::start().await;
 
     // Truncated/malformed XML
@@ -204,8 +255,10 @@ async fn test_truncated_feed_returns_error() {
     }
 }
 
-#[tokio::test]
-async fn test_missing_fields_parsed() {
+    /// Test: entries missing optional fields (title, journal_ref) are parsed
+    /// and defaulted (empty strings / None) where appropriate.
+    #[tokio::test]
+    async fn test_missing_fields_parsed() {
     let mock_server = MockServer::start().await;
 
     // Entry missing title and journal_ref
@@ -244,8 +297,9 @@ async fn test_missing_fields_parsed() {
     assert_eq!(r.authors, vec!["Solo".to_string()]);
 }
 
-#[tokio::test]
-async fn test_many_authors_parsing() {
+    /// Test: large number of authors are parsed and returned in order.
+    #[tokio::test]
+    async fn test_many_authors_parsing() {
     let mock_server = MockServer::start().await;
 
     // Create a feed with many authors
@@ -291,8 +345,10 @@ async fn test_many_authors_parsing() {
     assert_eq!(r.authors.len(), 50);
 }
 
-#[tokio::test]
-async fn test_escaped_entities() {
+    /// Test: escaped XML entities in title/author are unescaped correctly when
+    /// fetched via the HTTP scraper.
+    #[tokio::test]
+    async fn test_escaped_entities() {
     let mock_server = MockServer::start().await;
 
     let feed = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -329,6 +385,8 @@ async fn test_escaped_entities() {
     assert_eq!(r.title, "A & B <C>");
 }
 
+// Test: chunked input where an escaped entity is split across chunks; title
+// entities must be unescaped and reconstructed correctly.
 #[test]
 fn test_escaped_entities_chunked() {
     use crate::scrapers::arxiv;
@@ -354,6 +412,8 @@ fn test_escaped_entities_chunked() {
     assert_eq!(r.title, "A & B <C>");
 }
 
+// Test: primary_category variants (namespaced and plain) should set the
+// publication venue when journal_ref is absent.
 #[test]
 fn test_primary_category_variants_and_venue() {
     use crate::scrapers::arxiv;
@@ -365,15 +425,17 @@ fn test_primary_category_variants_and_venue() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs1 = arxiv::parse_entries_from_chunks(&vec![entry1], start, end);
-    let recs2 = arxiv::parse_entries_from_chunks(&vec![entry2], start, end);
+    let recs1 = arxiv::parse_entries_from_chunks(&[entry1], start, end);
+    let recs2 = arxiv::parse_entries_from_chunks(&[entry2], start, end);
 
     assert_eq!(recs1.len(), 1);
-    assert_eq!(recs1[0].venue.as_ref().map(|s| s.as_str()), Some("cs.AI"));
+    assert_eq!(recs1[0].venue.as_deref(), Some("cs.AI"));
     assert_eq!(recs2.len(), 1);
-    assert_eq!(recs2[0].venue.as_ref().map(|s| s.as_str()), Some("math.OC"));
+    assert_eq!(recs2[0].venue.as_deref(), Some("math.OC"));
 }
 
+// Test: entries with invalid or out-of-range `published` timestamps should be
+// excluded from results.
 #[test]
 fn test_published_invalid_or_out_of_range() {
     use crate::scrapers::arxiv;
@@ -387,13 +449,14 @@ fn test_published_invalid_or_out_of_range() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let r1 = arxiv::parse_entries_from_chunks(&vec![bad_date], start, end);
-    let r2 = arxiv::parse_entries_from_chunks(&vec![out_of_range], start, end);
+    let r1 = arxiv::parse_entries_from_chunks(&[bad_date], start, end);
+    let r2 = arxiv::parse_entries_from_chunks(&[out_of_range], start, end);
 
     assert!(r1.is_empty());
     assert!(r2.is_empty());
 }
 
+// Test: parser correctly handles elements in the default Atom namespace.
 #[test]
 fn test_namespaced_elements_parsing() {
     use crate::scrapers::arxiv;
@@ -405,11 +468,13 @@ fn test_namespaced_elements_parsing() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     assert_eq!(recs.len(), 1);
     assert_eq!(recs[0].title, "Namespaced");
 }
 
+// Test: `journal_ref` takes precedence over `primary_category` for the
+// resulting `venue` field.
 #[test]
 fn test_journal_ref_precedence_over_primary_category() {
     use crate::scrapers::arxiv;
@@ -420,14 +485,13 @@ fn test_journal_ref_precedence_over_primary_category() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     assert_eq!(recs.len(), 1);
-    assert_eq!(
-        recs[0].venue.as_ref().map(|s| s.as_str()),
-        Some("Journal X")
-    );
+    assert_eq!(recs[0].venue.as_deref(), Some("Journal X"));
 }
 
+// Test: fallback substring scan for `primary_category` picks up term when
+// structured attribute parsing doesn't find it.
 #[test]
 fn test_primary_category_substring_fallback() {
     use crate::scrapers::arxiv;
@@ -440,12 +504,14 @@ fn test_primary_category_substring_fallback() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     // the substring fallback should extract 'span.A' as venue
     assert_eq!(recs.len(), 1);
-    assert_eq!(recs[0].venue.as_ref().map(|s| s.as_str()), Some("span.A"));
+    assert_eq!(recs[0].venue.as_deref(), Some("span.A"));
 }
 
+// Test: malformed XML inside entries should not panic the parser; such
+// entries may be skipped.
 #[test]
 fn test_malformed_entry_handling() {
     use crate::scrapers::arxiv;
@@ -457,12 +523,13 @@ fn test_malformed_entry_handling() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     // parser should not panic; it's acceptable for malformed entries to be
     // skipped or yield no records
     assert!(recs.is_empty());
 }
 
+// Test: entries missing a `published` element are not included in results.
 #[test]
 fn test_missing_published_does_not_include() {
     use crate::scrapers::arxiv;
@@ -475,10 +542,12 @@ fn test_missing_published_does_not_include() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     assert!(recs.is_empty());
 }
 
+// Test: attribute keys with prefixes (e.g., `arxiv:term`) should still match
+// when looking for keys that end with 'term'.
 #[test]
 fn test_attribute_namespaced_term_suffix() {
     use crate::scrapers::arxiv;
@@ -490,22 +559,25 @@ fn test_attribute_namespaced_term_suffix() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     assert_eq!(recs.len(), 1);
-    assert_eq!(recs[0].venue.as_ref().map(|s| s.as_str()), Some("x.A"));
+    assert_eq!(recs[0].venue.as_deref(), Some("x.A"));
 }
 
+// Test: sanity checks for `ArxivConfig::default()` values.
 #[test]
 fn test_arxiv_config_default_values() {
     use crate::scrapers::arxiv::ArxivConfig;
 
     let cfg = ArxivConfig::default();
     // basic sanity checks
-    assert!(cfg.base_url.contains("arxiv") || cfg.base_url.len() > 0);
+    assert!(cfg.base_url.contains("arxiv") || !cfg.base_url.is_empty());
     assert!(cfg.page_size > 0);
     assert!(cfg.channel_size > 0);
 }
 
+// Test: parsing a large entry with many authors, journal_ref and primary
+// category — ensure all fields are captured.
 #[test]
 fn test_large_entry_all_fields() {
     use crate::scrapers::arxiv;
@@ -525,15 +597,17 @@ fn test_large_entry_all_fields() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     assert_eq!(recs.len(), 1);
     let r = &recs[0];
     assert_eq!(r.id, "big1");
     assert_eq!(r.title, "Big");
     assert_eq!(r.authors.len(), 20);
-    assert_eq!(r.venue.as_ref().map(|s| s.as_str()), Some("J Big"));
+    assert_eq!(r.venue.as_deref(), Some("J Big"));
 }
 
+// Test: title inside CDATA and author names with escaped entities are
+// correctly normalized and unescaped.
 #[test]
 fn test_title_cdata_and_author_escape() {
     use crate::scrapers::arxiv;
@@ -545,15 +619,17 @@ fn test_title_cdata_and_author_escape() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     assert_eq!(recs.len(), 1);
     assert_eq!(recs[0].title, "CD A & B <C>");
     assert_eq!(
-        recs[0].authors.get(0).map(|s| s.as_str()),
+        recs[0].authors.first().map(|s| s.as_str()),
         Some("Esc & Name")
     );
 }
 
+// Test: attributes using a namespace prefix in the feed text still match the
+// attribute-key-suffix logic (e.g., 'arxiv:term').
 #[test]
 fn test_namespaced_attribute_with_prefix_term() {
     use crate::scrapers::arxiv;
@@ -566,7 +642,43 @@ fn test_namespaced_attribute_with_prefix_term() {
     let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
     let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
 
-    let recs = arxiv::parse_entries_from_chunks(&vec![feed], start, end);
+    let recs = arxiv::parse_entries_from_chunks(&[feed], start, end);
     assert_eq!(recs.len(), 1);
-    assert_eq!(recs[0].venue.as_ref().map(|s| s.as_str()), Some("pref.A"));
+    assert_eq!(recs[0].venue.as_deref(), Some("pref.A"));
+}
+
+// Test: parsing of ArXiv-specific metadata elements (arxiv:primary_category,
+// arxiv:doi, arxiv:comment, and journal_ref). Ensure presence of extra
+// arXiv-specific tags does not break parsing and that `journal_ref` takes
+// precedence over primary category when present.
+#[test]
+fn test_arxiv_metadata_parsing() {
+    use crate::scrapers::arxiv;
+    use chrono::{TimeZone, Utc};
+
+    let entry1 = r#"<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom'><entry><id>meta1</id><published>2025-10-23T00:00:00Z</published><title>M1</title><arxiv:primary_category xmlns:arxiv='http://arxiv.org/schemas/atom' term="cs.AI"/><arxiv:doi xmlns:arxiv='http://arxiv.org/schemas/atom'>10.1234/abcd</arxiv:doi><arxiv:comment xmlns:arxiv='http://arxiv.org/schemas/atom'>12 pages</arxiv:comment></entry></feed>"#.as_bytes().to_vec();
+
+    let entry2 = r#"<?xml version='1.0'?><feed xmlns='http://www.w3.org/2005/Atom' xmlns:arxiv='http://arxiv.org/schemas/atom'><entry><id>meta2</id><published>2025-10-24T00:00:00Z</published><title>M2</title><primary_category term="math.NT"/><journal_ref>Conf Proc X</journal_ref><arxiv:doi>10.5678/efgh</arxiv:doi></entry></feed>"#.as_bytes().to_vec();
+
+    let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
+    let end = Utc.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap();
+
+    let recs = arxiv::parse_entries_from_chunks(&[entry1, entry2], start, end);
+    assert_eq!(recs.len(), 2);
+
+    // Find records by id
+    let mut map = std::collections::HashMap::new();
+    for r in recs {
+        map.insert(r.id.clone(), r);
+    }
+
+    let r1 = map.get("meta1").expect("meta1 present");
+    // primary_category should be used as venue when journal_ref absent
+    assert_eq!(r1.venue.as_deref(), Some("cs.AI"));
+
+    let r2 = map.get("meta2").expect("meta2 present");
+    // journal_ref should take precedence over primary_category
+    assert_eq!(r2.venue.as_deref(), Some("Conf Proc X"));
+}
+
 }
