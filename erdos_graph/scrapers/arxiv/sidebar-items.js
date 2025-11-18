@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["scrape_range"]};
+window.SIDEBAR_ITEMS = {"fn":["scrape_range","scrape_range_async","scrape_range_with_config_async"],"struct":["ArxivConfig"]};
