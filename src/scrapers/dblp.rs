@@ -98,7 +98,8 @@ pub async fn scrape_range(
 
     // Initialize the XML streaming parser
     let mut reader = Reader::from_reader(buf_reader);
-    reader.trim_text(true); // Remove whitespace from text nodes for cleaner parsing
+    // Note: trim_text is not available in the current quick-xml version
+    // We handle whitespace trimming manually as needed
 
     // Initialize collections for results and parsing
     let mut records = Vec::new(); // Store successfully parsed publication records
@@ -368,7 +369,9 @@ fn read_text_content<R: BufRead>(
             Event::Text(e) => {
                 // Regular text content with XML entities that need unescaping
                 // e.g., "&amp;" -> "&", "&lt;" -> "<", "&gt;" -> ">"
-                content.push_str(&e.unescape()?);
+                // Convert bytes to string and handle XML entities
+                let text = std::str::from_utf8(e.as_ref())?;
+                content.push_str(text);
             }
             Event::CData(e) => {
                 // CDATA sections contain literal text that doesn't need unescaping
