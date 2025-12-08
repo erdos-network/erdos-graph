@@ -702,14 +702,6 @@ mod tests {
     }
 
     #[test]
-    fn test_venue_short_acronym() {
-        let venues = vec!["ICML", "NeurIPS", "SIGMOD", "VLDB"];
-        for venue in venues {
-            assert_eq!(venue.len(), 4);
-        }
-    }
-
-    #[test]
     fn test_venue_with_year() {
         let venue = "NeurIPS 2024";
         assert!(venue.contains("NeurIPS"));
