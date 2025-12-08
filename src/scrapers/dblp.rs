@@ -67,7 +67,7 @@ pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    if (start_date = end_date) {
+    if (start_date >= end_date) {
         return Ok(Vec::new());
     }
 
