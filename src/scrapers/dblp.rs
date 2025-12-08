@@ -67,10 +67,10 @@ pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    if(start_date = end_date) {
+    if (start_date = end_date) {
         return Ok(Vec::new());
     }
-    
+
     // Extract year components for filtering - DBLP filtering is done by year only
     let start_year = start_date.year();
     let end_year = end_date.year();
