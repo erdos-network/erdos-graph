@@ -561,21 +561,21 @@ mod tests {
 
     #[test]
     fn test_single_author() {
-        let xml = r#"<article key="test/2024">
+        let _xml = r#"<article key="test/2024">
             <title>Solo Work</title>
             <author>Alice</author>
             <year>2024</year>
             <journal>Journal</journal>
         </article>"#;
 
-        let authors = vec!["Alice"];
+        let authors = ["Alice"];
         assert_eq!(authors.len(), 1);
         assert_eq!(authors[0], "Alice");
     }
 
     #[test]
     fn test_two_authors() {
-        let xml = r#"<article key="test/2024">
+        let _xml = r#"<article key="test/2024">
             <title>Collaboration</title>
             <author>Alice</author>
             <author>Bob</author>
@@ -583,7 +583,7 @@ mod tests {
             <journal>Journal</journal>
         </article>"#;
 
-        let authors = vec!["Alice", "Bob"];
+        let authors = ["Alice", "Bob"];
         assert_eq!(authors.len(), 2);
         assert_eq!(authors[0], "Alice");
         assert_eq!(authors[1], "Bob");
