@@ -14,6 +14,4 @@ pub mod scraping_orchestrator;
 pub mod zbmath;
 
 #[cfg(test)]
-mod tests {
-    pub mod test_dblp;
-}
+pub mod tests;
