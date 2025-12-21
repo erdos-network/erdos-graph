@@ -1,8 +1,46 @@
 #[cfg(test)]
 mod tests {
     use crate::db::ingestion::PublicationRecord;
-    use crate::scrapers::dblp;
+    use crate::scrapers::dblp::{self, DblpConfig};
     use chrono::{Datelike, TimeZone, Utc};
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use mockito::Server;
+    use std::io::Write;
+
+    /// Helper function to create gzipped XML response for mocking
+    fn create_gzipped_xml(xml: &str) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml.as_bytes()).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    /// Helper function to create a complete DBLP XML document with records
+    fn create_dblp_xml_response(records: &[&str]) -> String {
+        let mut xml = String::from(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<dblp>"#,
+        );
+
+        for record in records {
+            xml.push_str(record);
+        }
+
+        xml.push_str("\n</dblp>");
+        xml
+    }
+
+    /// Helper function to test scrape_range with mock URL
+    async fn test_scrape_range_with_mock_url(
+        start: chrono::DateTime<Utc>,
+        end: chrono::DateTime<Utc>,
+        mock_url: &str,
+    ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
+        let config = DblpConfig {
+            base_url: mock_url.to_string(),
+        };
+        dblp::scrape_range_with_config(start, end, config).await
+    }
 
     /// Helper function to create a sample DBLP XML fragment for testing parsing
     fn create_sample_dblp_xml() -> &'static str {
@@ -33,85 +71,103 @@ mod tests {
         </inproceedings>"#
     }
 
-    /// Test basic scrape_range function (async)
+    /// Test basic scrape_range function (async) with mocked server
     #[tokio::test]
     async fn test_dblp_scrape_range_basic() {
-        // Use a very narrow date range to minimize download time
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/jacm/Smith23" mdate="2023-01-01">
+    <author>John Smith</author>
+    <title>Test Article</title>
+    <year>2023</year>
+    <journal>Journal of the ACM</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
 
-        let result = dblp::scrape_range(start, end).await;
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
 
-        // Currently returns empty vec due to todo!() in parse_dblp_entry
-        match result {
-            Ok(records) => {
-                // With current implementation, expect empty results due to todo!()
-                println!("DBLP scraper returned {} records", records.len());
-
-                // If records are returned, verify they have correct structure
-                for record in &records {
-                    assert_eq!(record.source, "dblp");
-                    assert!(!record.id.is_empty());
-                    assert!(!record.title.is_empty());
-                    assert!(record.year > 1900);
-                }
-            }
-            Err(e) => {
-                // Network failures are acceptable in CI environments
-                eprintln!(
-                    "DBLP scraper test failed (likely due to todo!() or network): {}",
-                    e
-                );
-            }
-        }
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Test Article");
+        assert_eq!(records[0].authors, vec!["John Smith"]);
+        assert_eq!(records[0].year, 2023);
+        assert_eq!(records[0].source, "dblp");
     }
 
     /// Test empty date range handling
     #[tokio::test]
     async fn test_dblp_empty_range() {
+        let mut server = Server::new_async().await;
+
+        let xml_response = create_dblp_xml_response(&[]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
         let end = start; // Empty range
 
-        let result = dblp::scrape_range(start, end).await;
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
 
-        match result {
-            Ok(records) => {
-                // Empty range should return empty results
-                assert_eq!(
-                    records.len(),
-                    0,
-                    "Empty date range should return no records"
-                );
-            }
-            Err(e) => {
-                // Network/parsing failures are acceptable
-                eprintln!("Empty range test failed: {}", e);
-            }
-        }
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(
+            records.len(),
+            0,
+            "Empty date range should return no records"
+        );
     }
 
     /// Test invalid date range handling
     #[tokio::test]
     async fn test_dblp_invalid_range() {
+        let mut server = Server::new_async().await;
+
+        let xml_response = create_dblp_xml_response(&[]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
         // Start date after end date
         let start = Utc.with_ymd_and_hms(2023, 12, 31, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
 
-        let result = dblp::scrape_range(start, end).await;
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
 
-        match result {
-            Ok(records) => {
-                // Invalid range should return empty results
-                assert_eq!(
-                    records.len(),
-                    0,
-                    "Invalid date range should return no records"
-                );
-            }
-            Err(e) => {
-                eprintln!("Invalid range test failed: {}", e);
-            }
-        }
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(
+            records.len(),
+            0,
+            "Invalid date range should return no records"
+        );
     }
 
     /// Test DBLP XML parsing for article entries
@@ -262,67 +318,108 @@ mod tests {
     /// Test large file handling (simulate with small chunks)
     #[tokio::test]
     async fn test_dblp_large_file_handling() {
-        // Test with a slightly larger date range to ensure streaming works
+        let mut server = Server::new_async().await;
+
+        // Create multiple records to simulate a larger dataset
+        let records: Vec<&str> = (1..=50)
+            .map(|i| match i % 2 {
+                0 => {
+                    r#"
+<article key="journals/test/Author2020" mdate="2020-01-15">
+    <author>Test Author</author>
+    <title>Test Paper</title>
+    <year>2020</year>
+    <journal>Test Journal</journal>
+</article>"#
+                }
+                _ => {
+                    r#"
+<inproceedings key="conf/test/Author2020" mdate="2020-01-15">
+    <author>Another Author</author>
+    <title>Conference Paper</title>
+    <year>2020</year>
+    <booktitle>Test Conference</booktitle>
+</inproceedings>"#
+                }
+            })
+            .collect();
+
+        let xml_response = create_dblp_xml_response(&records);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
         let start = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(2020, 2, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2020, 12, 31, 23, 59, 59).unwrap();
 
-        let result = dblp::scrape_range(start, end).await;
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
 
-        match result {
-            Ok(records) => {
-                println!(
-                    "Successfully processed DBLP data, found {} records",
-                    records.len()
-                );
-                // Verify we can handle reasonably large result sets
-                // (Though current implementation likely returns empty due to todo!())
-            }
-            Err(e) => {
-                eprintln!("Large file test failed: {}", e);
-                // This is expected until full implementation is complete
-            }
-        }
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 50);
+        assert_eq!(records[0].source, "dblp");
     }
 
     /// Test error handling for network issues
     #[tokio::test]
     async fn test_dblp_network_error_handling() {
-        // Test with a very old date to minimize data while testing network handling
-        let start = Utc.with_ymd_and_hms(1900, 1, 1, 0, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(1900, 1, 2, 0, 0, 0).unwrap();
+        let mut server = Server::new_async().await;
 
-        let result = dblp::scrape_range(start, end).await;
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
 
-        // The function should handle network errors gracefully
-        match result {
-            Ok(_) => {
-                // Success is fine
-                println!("Network test succeeded");
-            }
-            Err(e) => {
-                // Errors are also acceptable - we're testing error handling
-                println!("Network error (expected in some environments): {}", e);
-                // Verify the error message is reasonable
-                let error_str = e.to_string();
-                // Should not panic or return cryptic errors
-                assert!(!error_str.is_empty());
-            }
-        }
+        let start = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("HTTP 500") || error_msg.contains("500"));
     }
 
     /// Test concurrent access (if needed in the future)
     #[tokio::test]
     async fn test_dblp_concurrent_scraping() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/Smith23" mdate="2023-01-01">
+    <author>Smith</author>
+    <title>Test</title>
+    <year>2023</year>
+    <journal>Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .expect(3) // Expect 3 calls
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
 
         // Test sequential calls (simulating concurrent access without spawn)
         for i in 0..3 {
-            let result = dblp::scrape_range(start, end).await;
-            match result {
-                Ok(_) => println!("Sequential task {} succeeded", i),
-                Err(e) => println!("Sequential task {} failed: {}", i, e),
-            }
+            let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+            assert!(result.is_ok(), "Sequential task {} failed", i);
         }
     }
 
@@ -356,52 +453,61 @@ mod tests {
     /// Integration test with actual DBLP data (small sample)
     #[tokio::test]
     async fn test_dblp_integration_small_sample() {
-        // Use a very narrow, recent date range to get a small sample
+        let mut server = Server::new_async().await;
+
+        let articles = vec![
+            r#"
+<article key="journals/jacm/Smith24" mdate="2024-01-01">
+    <author>Alice Smith</author>
+    <author>Bob Johnson</author>
+    <title>Graph Algorithms</title>
+    <year>2024</year>
+    <journal>JACM</journal>
+</article>"#,
+            r#"
+<inproceedings key="conf/icml/Doe24" mdate="2024-01-02">
+    <author>Jane Doe</author>
+    <title>Machine Learning</title>
+    <year>2024</year>
+    <booktitle>ICML</booktitle>
+</inproceedings>"#,
+        ];
+
+        let xml_response = create_dblp_xml_response(&articles);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(2024, 1, 7, 0, 0, 0).unwrap(); // 1 week
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
 
-        println!("Testing DBLP integration with 1-week sample from 2024");
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
 
-        let result = dblp::scrape_range(start, end).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 2);
 
-        match result {
-            Ok(records) => {
-                println!("Successfully retrieved {} DBLP records", records.len());
+        // Validate first record
+        assert_eq!(records[0].id, "journals/jacm/Smith24");
+        assert_eq!(records[0].title, "Graph Algorithms");
+        assert_eq!(records[0].authors, vec!["Alice Smith", "Bob Johnson"]);
+        assert_eq!(records[0].year, 2024);
+        assert_eq!(records[0].venue, Some("JACM".to_string()));
+        assert_eq!(records[0].source, "dblp");
 
-                if !records.is_empty() {
-                    // Test data quality on a few sample records
-                    let sample_size = std::cmp::min(5, records.len());
-
-                    for (i, record) in records.iter().take(sample_size).enumerate() {
-                        println!(
-                            "Sample {}: {} by {:?} ({})",
-                            i + 1,
-                            record.title,
-                            record.authors,
-                            record.year
-                        );
-
-                        // Basic validation
-                        assert!(!record.id.is_empty());
-                        assert!(!record.title.is_empty());
-                        assert!(!record.authors.is_empty());
-                        assert!(record.year >= 2020 && record.year <= 2030);
-                        assert_eq!(record.source, "dblp");
-
-                        // DBLP IDs should follow pattern like "conf/venue/AuthorYear" or "journals/venue/AuthorYear"
-                        assert!(record.id.contains("/") || record.id.starts_with("dblp:"));
-                    }
-                } else {
-                    println!(
-                        "No records found for the test period - this may be normal for very narrow date ranges"
-                    );
-                }
-            }
-            Err(e) => {
-                println!("Integration test failed: {}", e);
-                // Don't panic in integration tests due to external dependencies
-            }
-        }
+        // Validate second record
+        assert_eq!(records[1].id, "conf/icml/Doe24");
+        assert_eq!(records[1].title, "Machine Learning");
+        assert_eq!(records[1].authors, vec!["Jane Doe"]);
+        assert_eq!(records[1].year, 2024);
+        assert_eq!(records[1].venue, Some("ICML".to_string()));
+        assert_eq!(records[1].source, "dblp");
     }
 
     /// Test with PublicationRecord creation and validation

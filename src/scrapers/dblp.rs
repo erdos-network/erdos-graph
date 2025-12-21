@@ -29,6 +29,21 @@ use quick_xml::events::Event; // XML parsing events (Start, End, Text, etc.)
 use reqwest::Client; // HTTP client for downloading the XML dump
 use std::io::{BufRead, BufReader, Cursor};
 
+/// Configuration for DBLP scraper
+#[derive(Clone, Debug)]
+pub struct DblpConfig {
+    /// Base URL for the DBLP XML dump
+    pub base_url: String,
+}
+
+impl Default for DblpConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://dblp.org/xml/dblp.xml.gz".to_string(),
+        }
+    }
+}
+
 /// Scrapes DBLP publication data for a specified date range.
 ///
 /// This function downloads the complete DBLP XML dump and extracts publication records
@@ -57,15 +72,32 @@ use std::io::{BufRead, BufReader, Cursor};
 ///
 /// # Example
 /// ```rust,no_run
+/// use erdos_graph::scrapers::dblp::scrape_range;
 /// use chrono::{TimeZone, Utc};
 ///
+/// # tokio_test::block_on(async {
 /// let start = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
 /// let end = Utc.with_ymd_and_hms(2021, 12, 31, 23, 59, 59).unwrap();
 /// let records = scrape_range(start, end).await?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # });
 /// ```
 pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
+) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+    scrape_range_with_config(start_date, end_date, DblpConfig::default()).await
+}
+
+/// Scrapes DBLP publication data with custom configuration (for testing).
+///
+/// This is an internal function that allows overriding the DBLP URL for testing purposes.
+/// Use `scrape_range` for production code.
+#[doc(hidden)]
+pub async fn scrape_range_with_config(
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
+    config: DblpConfig,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
     if start_date >= end_date {
         return Ok(Vec::new());
@@ -77,7 +109,7 @@ pub async fn scrape_range(
 
     // Initialize HTTP client for downloading the DBLP XML dump
     let client = Client::new();
-    let url = "https://dblp.org/xml/dblp.xml.gz";
+    let url = &config.base_url;
 
     // Download the complete DBLP XML dump
     // WARNING: This file is very large (multiple GB), so this operation can take time
