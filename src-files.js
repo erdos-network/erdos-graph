@@ -1,2 +1,2 @@
-createSrcSidebar('[["erdos_graph",["",[["db",[],["client.rs","ingestion.rs","ingestion_queue.rs","mod.rs","schema.rs"]],["logger",[],["core.rs","mod.rs"]],["scrapers",[],["arxiv.rs","dblp.rs","mod.rs","scraping_orchestrator.rs","zbmath.rs"]]],["lib.rs","utilities.rs"]]]]');
-//{"start":19,"fragment_lengths":[251]}
+createSrcSidebar('[["erdos_graph",["",[["db",[],["client.rs","ingestion.rs","ingestion_queue.rs","mod.rs","schema.rs"]],["logger",[],["core.rs","mod.rs"]],["scrapers",[],["arxiv.rs","dblp.rs","mod.rs","scraper.rs","scraping_orchestrator.rs","zbmath.rs"]]],["lib.rs","utilities.rs"]]]]');
+//{"start":19,"fragment_lengths":[264]}

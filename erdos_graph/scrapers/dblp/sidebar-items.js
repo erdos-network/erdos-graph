@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["scrape_range"],"struct":["DblpConfig"]};
+window.SIDEBAR_ITEMS = {"fn":["scrape_range"],"struct":["DblpConfig","DblpScraper"]};
