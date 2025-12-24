@@ -1,11 +1,50 @@
 use crate::db::ingestion::PublicationRecord;
+use crate::scrapers::scraper::Scraper;
 use crate::utilities::generate_chunks;
+use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
 
 const ZBMATH_BASE_URL: &str = "https://oai.zbmath.org/v1/";
+
+/// ZbMATH scraper that implements the Scraper trait.
+#[derive(Clone, Debug)]
+pub struct ZbmathScraper {
+    config: ZbmathConfig,
+}
+
+impl ZbmathScraper {
+    /// Create a new ZbmathScraper with default configuration.
+    pub fn new() -> Self {
+        Self {
+            config: ZbmathConfig::default(),
+        }
+    }
+
+    /// Create a new ZbmathScraper with custom configuration.
+    pub fn with_config(config: ZbmathConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Default for ZbmathScraper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Scraper for ZbmathScraper {
+    async fn scrape_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+        scrape_range_with_config(start, end, self.config.clone()).await
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ZbmathConfig {

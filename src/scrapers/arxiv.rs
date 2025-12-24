@@ -1,4 +1,6 @@
 use crate::db::ingestion::PublicationRecord;
+use crate::scrapers::scraper::Scraper;
+use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
 use quick_xml::Reader;
 use quick_xml::escape::unescape as quick_unescape;
@@ -6,6 +8,43 @@ use quick_xml::events::BytesStart;
 use quick_xml::events::Event;
 use reqwest::Client;
 use tokio::time::{Duration, sleep};
+
+/// ArXiv scraper that implements the Scraper trait.
+#[derive(Clone, Debug)]
+pub struct ArxivScraper {
+    config: ArxivConfig,
+}
+
+impl ArxivScraper {
+    /// Create a new ArxivScraper with default configuration.
+    pub fn new() -> Self {
+        Self {
+            config: ArxivConfig::default(),
+        }
+    }
+
+    /// Create a new ArxivScraper with custom configuration.
+    pub fn with_config(config: ArxivConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Default for ArxivScraper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Scraper for ArxivScraper {
+    async fn scrape_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+        scrape_range_with_config_async(start, end, self.config.clone()).await
+    }
+}
 
 #[derive(Clone, Debug)]
 /// Configuration for the ArXiv scraper.
