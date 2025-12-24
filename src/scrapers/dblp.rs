@@ -22,12 +22,51 @@
 //! Each entry contains metadata like authors, title, year, venue, etc.
 
 use crate::db::ingestion::PublicationRecord;
+use crate::scrapers::scraper::Scraper;
+use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
 use flate2::read::GzDecoder; // For decompressing the gzipped XML dump
 use quick_xml::Reader; // Fast XML streaming parser
 use quick_xml::events::Event; // XML parsing events (Start, End, Text, etc.)
 use reqwest::Client; // HTTP client for downloading the XML dump
 use std::io::{BufRead, BufReader, Cursor};
+
+/// DBLP scraper that implements the Scraper trait.
+#[derive(Clone, Debug)]
+pub struct DblpScraper {
+    config: DblpConfig,
+}
+
+impl DblpScraper {
+    /// Create a new DblpScraper with default configuration.
+    pub fn new() -> Self {
+        Self {
+            config: DblpConfig::default(),
+        }
+    }
+
+    /// Create a new DblpScraper with custom configuration.
+    pub fn with_config(config: DblpConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Default for DblpScraper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Scraper for DblpScraper {
+    async fn scrape_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+        scrape_range_with_config(start, end, self.config.clone()).await
+    }
+}
 
 /// Configuration for DBLP scraper
 #[derive(Clone, Debug)]

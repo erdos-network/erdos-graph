@@ -4,7 +4,7 @@
 //! checkpointing, chunking large date ranges, and ingesting results into the database.
 
 use crate::db::ingestion::{get_checkpoint, ingest_publication, set_checkpoint};
-use crate::scrapers::{arxiv, dblp, zbmath};
+use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
 use crate::utilities::generate_chunks;
 use chrono::{DateTime, Duration, Utc};
 use indradb::{Database, Datastore};
@@ -97,13 +97,16 @@ pub async fn run_chunk(
     end_date: DateTime<Utc>,
     datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Dispatch to the appropriate scraper
-    let records = match source {
-        "arxiv" => arxiv::scrape_range(start_date, end_date)?,
-        "dblp" => dblp::scrape_range(start_date, end_date).await?,
-        "zbmath" => zbmath::scrape_range(start_date, end_date).await?,
+    // Create the appropriate scraper based on source name
+    let scraper: Box<dyn Scraper> = match source {
+        "arxiv" => Box::new(ArxivScraper::new()),
+        "dblp" => Box::new(DblpScraper::new()),
+        "zbmath" => Box::new(ZbmathScraper::new()),
         _ => return Err("Unknown source".into()),
     };
+
+    // Scrape records using the trait method
+    let records = scraper.scrape_range(start_date, end_date).await?;
 
     // Ingest all records into the database
     for record in records {
