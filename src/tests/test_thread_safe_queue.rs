@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::db::ingestion::PublicationRecord;
-    use crate::db::ingestion_queue::{IngestionQueue, QueueConfig};
+    use crate::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use std::thread;
     use std::time::Duration;
 
@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn test_enqueue_dequeue_fifo_order() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
 
         // Enqueue multiple records
         queue.enqueue(create_test_record("1")).unwrap();
@@ -37,7 +37,8 @@ mod tests {
 
     #[test]
     fn test_dequeue_empty_queue_returns_none() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
 
         assert_eq!(queue.dequeue(), None);
         assert_eq!(queue.queue_size(), 0);
@@ -45,7 +46,8 @@ mod tests {
 
     #[test]
     fn test_producer_registration_tracking() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
 
         // Initially no producers (but producers_done is false until first registration cycle)
         assert_eq!(queue.active_producer_count(), 0);
@@ -73,7 +75,8 @@ mod tests {
 
     #[test]
     fn test_producer_handle_raii_cleanup() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
 
         {
             let _producer = queue.create_producer();
@@ -87,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_producer_handle_submit() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
 
         producer.submit(create_test_record("via-producer")).unwrap();
@@ -98,7 +101,7 @@ mod tests {
 
     #[test]
     fn test_multiple_producers_concurrent_submit() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
 
         let queue1 = queue.clone();
         let queue2 = queue.clone();
@@ -131,7 +134,8 @@ mod tests {
 
     #[test]
     fn test_producers_done_status() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
 
         // Register and unregister producer to set producers_done
         let producer = queue.create_producer();
@@ -146,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_queue_clone_shares_state() {
-        let queue1 = IngestionQueue::new(QueueConfig::default());
+        let queue1 = ThreadSafeQueue::new(QueueConfig::default());
         let queue2 = queue1.clone();
 
         // Enqueue on queue1
@@ -164,7 +168,7 @@ mod tests {
     #[test]
     fn test_backpressure_when_queue_full() {
         let config = QueueConfig { max_queue_size: 5 };
-        let queue = IngestionQueue::new(config);
+        let queue = ThreadSafeQueue::new(config);
 
         // Fill queue to capacity
         for i in 0..5 {
@@ -191,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_poison_recovery() {
-        let queue = IngestionQueue::new(QueueConfig::default());
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
 
         // Enqueue some items first
         queue.enqueue(create_test_record("before-panic")).unwrap();

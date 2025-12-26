@@ -10,7 +10,6 @@
 
 pub mod client;
 pub mod ingestion;
-pub mod ingestion_queue;
 pub mod schema;
 
 #[cfg(test)]
