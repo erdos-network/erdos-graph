@@ -387,8 +387,11 @@ mod tests {
 
         thread::sleep(Duration::from_millis(100));
 
-        // Drain queue to unblock all producers
-        while queue.dequeue().is_some() {}
+        // Dequeue items one by one to unblock producers
+        // Wait for all producer threads to complete before checking final queue size
+        queue.dequeue();
+        queue.dequeue();
+        queue.dequeue();
 
         for handle in handles {
             handle.join().unwrap();
