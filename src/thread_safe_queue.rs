@@ -1,16 +1,15 @@
-//! Thread-safe publication queue with producer tracking.
+//! Thread-safe queue with producer tracking.
 //!
-//! Provides a bounded buffer for PublicationRecords with backpressure handling.
+//! Provides a generic bounded buffer with backpressure handling.
 //! Tracks active producers via RAII handles to detect when all have finished.
 
-use crate::db::ingestion::PublicationRecord;
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
 /// Configuration for queue limits.
 #[derive(Clone, Debug)]
 pub struct QueueConfig {
-    /// Maximum buffered publications before applying backpressure.
+    /// Maximum buffered items before applying backpressure.
     pub max_queue_size: usize,
 }
 
@@ -23,23 +22,23 @@ impl Default for QueueConfig {
 }
 
 /// Shared state protected by mutex for thread-safe access.
-struct QueueState {
-    queue: VecDeque<PublicationRecord>,
+struct QueueState<T> {
+    queue: VecDeque<T>,
     producers_done: bool,
     active_producers: usize,
 }
 
-/// Thread-safe queue for coordinating publication ingestion.
+/// Thread-safe queue with producer tracking.
 ///
 /// Cloneable to share across threads - each clone references the same underlying queue.
-pub struct IngestionQueue {
-    state: Arc<Mutex<QueueState>>,
+pub struct ThreadSafeQueue<T> {
+    state: Arc<Mutex<QueueState<T>>>,
     not_full: Arc<Condvar>,  // Notifies when queue has space
     not_empty: Arc<Condvar>, // Notifies when queue has items
     config: QueueConfig,
 }
 
-impl IngestionQueue {
+impl<T> ThreadSafeQueue<T> {
     /// Creates a new queue with the specified configuration.
     pub fn new(config: QueueConfig) -> Self {
         Self {
@@ -75,13 +74,10 @@ impl IngestionQueue {
         }
     }
 
-    /// Adds a publication to the queue. Blocks efficiently if queue is full.
+    /// Adds an item to the queue. Blocks efficiently if queue is full.
     ///
     /// Uses condition variable to wait for space instead of polling.
-    pub fn enqueue(
-        &self,
-        record: PublicationRecord,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn enqueue(&self, item: T) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut state = self.state.lock().unwrap_or_else(|poisoned| {
             eprintln!("Mutex poisoned in enqueue, recovering");
             poisoned.into_inner()
@@ -95,16 +91,16 @@ impl IngestionQueue {
             });
         }
 
-        state.queue.push_back(record);
+        state.queue.push_back(item);
         // Notify a waiting consumer that an item is available
         self.not_empty.notify_one();
         Ok(())
     }
 
-    /// Removes and returns the next publication from the queue, or None if empty.
+    /// Removes and returns the next item from the queue, or None if empty.
     ///
     /// Notifies waiting producers when space becomes available.
-    pub fn dequeue(&self) -> Option<PublicationRecord> {
+    pub fn dequeue(&self) -> Option<T> {
         let mut state = self.state.lock().unwrap_or_else(|poisoned| {
             eprintln!("Mutex poisoned in dequeue, recovering");
             poisoned.into_inner()
@@ -117,7 +113,7 @@ impl IngestionQueue {
         result
     }
 
-    /// Returns the current number of publications in the queue.
+    /// Returns the current number of items in the queue.
     pub fn queue_size(&self) -> usize {
         self.state
             .lock()
@@ -155,7 +151,7 @@ impl IngestionQueue {
     }
 
     /// Creates a RAII producer handle that auto-registers/unregisters.
-    pub fn create_producer(&self) -> QueueProducer {
+    pub fn create_producer(&self) -> QueueProducer<T> {
         self.register_producer();
         QueueProducer {
             queue: self.clone(),
@@ -163,7 +159,7 @@ impl IngestionQueue {
     }
 }
 
-impl Clone for IngestionQueue {
+impl<T> Clone for ThreadSafeQueue<T> {
     /// Clones the Arc reference to share the same underlying queue across threads.
     fn clone(&self) -> Self {
         Self {
@@ -175,22 +171,19 @@ impl Clone for IngestionQueue {
     }
 }
 
-/// RAII handle that auto-unregisters producer on drop, even if scraper panics.
-pub struct QueueProducer {
-    queue: IngestionQueue,
+/// RAII handle that auto-unregisters producer on drop, even if producer panics.
+pub struct QueueProducer<T> {
+    queue: ThreadSafeQueue<T>,
 }
 
-impl QueueProducer {
-    /// Adds a publication to the queue. Delegates to the queue's enqueue method.
-    pub fn submit(
-        &self,
-        record: PublicationRecord,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.queue.enqueue(record)
+impl<T> QueueProducer<T> {
+    /// Adds an item to the queue. Delegates to the queue's enqueue method.
+    pub fn submit(&self, item: T) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.queue.enqueue(item)
     }
 }
 
-impl Drop for QueueProducer {
+impl<T> Drop for QueueProducer<T> {
     /// Automatically unregisters producer. Sets producers_done when last producer drops.
     fn drop(&mut self) {
         self.queue.unregister_producer();

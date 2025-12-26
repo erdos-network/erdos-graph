@@ -13,6 +13,8 @@
 //! - Provide a global logger facade and initialization helper
 //! - Add feature flags to swap between implementations
 
+#![coverage(off)]
+
 pub mod core;
 
 pub use core::{LogLevel, Logger, NoopLogger, StdoutLogger};

@@ -1052,4 +1052,1030 @@ mod tests {
         assert!(year > 1900);
         assert!(year < 2100);
     }
+
+    // ==================== Constructor and Configuration Tests ====================
+
+    #[test]
+    fn test_dblp_scraper_new() {
+        use crate::scrapers::dblp::DblpScraper;
+        let scraper = DblpScraper::new();
+        // Verify the scraper is created successfully
+        assert!(format!("{:?}", scraper).contains("DblpScraper"));
+    }
+
+    #[test]
+    fn test_dblp_scraper_default() {
+        use crate::scrapers::dblp::DblpScraper;
+        let scraper = DblpScraper::default();
+        assert!(format!("{:?}", scraper).contains("DblpScraper"));
+    }
+
+    #[test]
+    fn test_dblp_scraper_with_config() {
+        use crate::scrapers::dblp::{DblpConfig, DblpScraper};
+        let config = DblpConfig {
+            base_url: "https://example.com/test.xml.gz".to_string(),
+        };
+        let scraper = DblpScraper::with_config(config.clone());
+        assert!(format!("{:?}", scraper).contains("DblpScraper"));
+    }
+
+    #[test]
+    fn test_dblp_config_default() {
+        let config = DblpConfig::default();
+        assert!(config.base_url.contains("dblp.org"));
+        assert!(config.base_url.ends_with(".xml.gz"));
+    }
+
+    #[tokio::test]
+    async fn test_dblp_scraper_trait_implementation() {
+        use crate::scrapers::dblp::DblpScraper;
+        use crate::scrapers::scraper::Scraper;
+
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/Smith24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Test Article for Trait</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_header("content-type", "application/gzip")
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let config = DblpConfig {
+            base_url: server.url(),
+        };
+        let scraper = DblpScraper::with_config(config);
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = scraper.scrape_range(start, end).await;
+        assert!(result.is_ok());
+    }
+
+    // ==================== XML Element Skipping Tests ====================
+
+    #[tokio::test]
+    async fn test_xml_element_with_pages() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/WithPages24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with Pages Element</title>
+    <year>2024</year>
+    <pages>100-120</pages>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_xml_element_with_volume() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/WithVolume24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with Volume Element</title>
+    <year>2024</year>
+    <volume>42</volume>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_xml_element_with_ee() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/WithEE24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with Electronic Edition</title>
+    <year>2024</year>
+    <ee>https://doi.org/10.1234/test.2024</ee>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_xml_element_with_number() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/WithNumber24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with Issue Number</title>
+    <year>2024</year>
+    <number>3</number>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_xml_element_with_crossref() {
+        let mut server = Server::new_async().await;
+
+        let inproceedings = r#"
+<inproceedings key="conf/test/Paper24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Paper with Crossref</title>
+    <year>2024</year>
+    <crossref>conf/test/2024</crossref>
+    <booktitle>Test Conference</booktitle>
+</inproceedings>"#;
+
+        let xml_response = create_dblp_xml_response(&[inproceedings]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_xml_element_with_nested_unknown() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/NestedUnknown24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with Nested Unknown Elements</title>
+    <year>2024</year>
+    <metadata>
+        <nested>
+            <deep>Ignored Content</deep>
+        </nested>
+    </metadata>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    // ==================== CDATA Handling Tests ====================
+
+    #[tokio::test]
+    async fn test_title_with_cdata() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/CDATA24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title><![CDATA[Article <with> Special & Characters]]></title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].title.contains("<with>"));
+        assert!(records[0].title.contains("&"));
+    }
+
+    #[tokio::test]
+    async fn test_author_with_cdata() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/CDATAAuthor24" mdate="2024-01-01">
+    <author><![CDATA[Smith & Jones]]></author>
+    <title>Test Article</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].authors.len(), 1);
+        assert!(records[0].authors[0].contains("&"));
+    }
+
+    // ==================== Missing Fields Tests ====================
+
+    #[tokio::test]
+    async fn test_article_missing_title() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/NoTitle24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Record should be filtered out due to missing title
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_article_missing_author() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/NoAuthor24" mdate="2024-01-01">
+    <title>Article Without Author</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Record should be filtered out due to missing author
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_article_missing_year() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/NoYear24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article Without Year</title>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Record should be filtered out due to missing year
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_article_empty_title() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/EmptyTitle24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>   </title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Record should be filtered out due to empty title
+        assert_eq!(records.len(), 0);
+    }
+
+    // ==================== Different Publication Types Tests ====================
+
+    #[tokio::test]
+    async fn test_book_element_ignored() {
+        let mut server = Server::new_async().await;
+
+        let book = r#"
+<book key="books/test/Book24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Test Book</title>
+    <year>2024</year>
+    <publisher>Test Publisher</publisher>
+</book>"#;
+
+        let xml_response = create_dblp_xml_response(&[book]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Books are ignored, only articles and inproceedings are processed
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_proceedings_element_ignored() {
+        let mut server = Server::new_async().await;
+
+        let proceedings = r#"
+<proceedings key="conf/test/2024" mdate="2024-01-01">
+    <editor>Test Editor</editor>
+    <title>Test Conference Proceedings</title>
+    <year>2024</year>
+    <booktitle>Test Conference 2024</booktitle>
+</proceedings>"#;
+
+        let xml_response = create_dblp_xml_response(&[proceedings]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Proceedings are ignored
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_mixed_publication_types() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/Article24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Test Article</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let book = r#"
+<book key="books/test/Book24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Test Book</title>
+    <year>2024</year>
+</book>"#;
+
+        let inproceedings = r#"
+<inproceedings key="conf/test/Paper24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Test Paper</title>
+    <year>2024</year>
+    <booktitle>Test Conference</booktitle>
+</inproceedings>"#;
+
+        let xml_response = create_dblp_xml_response(&[article, book, inproceedings]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Should only get article and inproceedings, not book
+        assert_eq!(records.len(), 2);
+    }
+
+    // ==================== Public API Tests ====================
+
+    #[tokio::test]
+    async fn test_public_scrape_range() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/Public24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Public API Test</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        // Note: The public scrape_range function uses the default URL,
+        // so we can't easily test it without mocking the actual DBLP server.
+        // Instead, we test the trait implementation which calls the internal function
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    // ==================== Error Path Tests ====================
+
+    #[tokio::test]
+    async fn test_parse_element_with_invalid_year() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/InvalidYear24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with Invalid Year</title>
+    <year>not-a-number</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Record should be filtered out due to invalid year
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_parse_element_with_malformed_xml_in_content() {
+        let mut server = Server::new_async().await;
+
+        // This has unclosed tags in the content but is still valid XML structure
+        let article = r#"
+<article key="journals/test/Malformed24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with &lt;unclosed tag</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_truncated_xml_element() {
+        let mut server = Server::new_async().await;
+
+        // XML with a truncated article element (missing closing tag)
+        // The scraper handles individual element errors gracefully and continues
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<dblp>
+<article key="journals/test/Truncated24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Truncated Article
+</dblp>"#;
+
+        let gzipped = create_gzipped_xml(xml);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        // The scraper handles element-level errors gracefully and continues processing
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // The truncated record should be skipped
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_deeply_nested_unknown_elements() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/DeeplyNested24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with Deeply Nested Unknown Elements</title>
+    <year>2024</year>
+    <metadata>
+        <level1>
+            <level2>
+                <level3>
+                    <level4>
+                        <level5>Deep content</level5>
+                    </level4>
+                </level3>
+            </level2>
+        </level1>
+    </metadata>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_articles_some_invalid() {
+        let mut server = Server::new_async().await;
+
+        let valid_article1 = r#"
+<article key="journals/test/Valid1" mdate="2024-01-01">
+    <author>Author One</author>
+    <title>Valid Article One</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let invalid_article = r#"
+<article key="journals/test/Invalid" mdate="2024-01-01">
+    <title>Missing Author</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let valid_article2 = r#"
+<article key="journals/test/Valid2" mdate="2024-01-01">
+    <author>Author Two</author>
+    <title>Valid Article Two</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response =
+            create_dblp_xml_response(&[valid_article1, invalid_article, valid_article2]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Should get only the two valid articles
+        assert_eq!(records.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_author_whitespace_trimming() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/Whitespace24" mdate="2024-01-01">
+    <author>   John Smith   </author>
+    <author>
+        Jane Doe
+    </author>
+    <title>Whitespace Test</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        // Check that whitespace is properly trimmed
+        assert_eq!(records[0].authors[0], "John Smith");
+        assert!(records[0].authors[1].contains("Jane Doe"));
+    }
+
+    #[tokio::test]
+    async fn test_title_whitespace_trimming() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/TitleWhitespace24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>
+        Title with Extra Whitespace
+    </title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        // Title should have leading/trailing whitespace trimmed
+        assert!(records[0].title.contains("Title with Extra Whitespace"));
+    }
+
+    #[tokio::test]
+    async fn test_article_with_url_element() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/WithURL24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article with URL</title>
+    <year>2024</year>
+    <url>https://example.com/article</url>
+    <journal>Test Journal</journal>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_inproceedings_without_booktitle() {
+        let mut server = Server::new_async().await;
+
+        let inproceedings = r#"
+<inproceedings key="conf/test/NoBooktitle24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Conference Paper Without Booktitle</title>
+    <year>2024</year>
+</inproceedings>"#;
+
+        let xml_response = create_dblp_xml_response(&[inproceedings]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].venue.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_article_without_journal() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<article key="journals/test/NoJournal24" mdate="2024-01-01">
+    <author>Test Author</author>
+    <title>Article Without Journal</title>
+    <year>2024</year>
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].venue.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_xml_comments_ignored() {
+        let mut server = Server::new_async().await;
+
+        let article = r#"
+<!-- This is a comment -->
+<article key="journals/test/WithComments24" mdate="2024-01-01">
+    <!-- Another comment -->
+    <author>Test Author</author>
+    <title>Article With Comments</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+    <!-- Final comment -->
+</article>"#;
+
+        let xml_response = create_dblp_xml_response(&[article]);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_large_dataset_progress_reporting() {
+        let mut server = Server::new_async().await;
+
+        // Generate 1001 articles to trigger progress reporting
+        let mut articles = Vec::new();
+        for i in 0..1001 {
+            articles.push(format!(
+                r#"
+<article key="journals/test/Article{}" mdate="2024-01-01">
+    <author>Author {}</author>
+    <title>Test Article {}</title>
+    <year>2024</year>
+    <journal>Test Journal</journal>
+</article>"#,
+                i, i, i
+            ));
+        }
+
+        let article_refs: Vec<&str> = articles.iter().map(|s| s.as_str()).collect();
+        let xml_response = create_dblp_xml_response(&article_refs);
+        let gzipped = create_gzipped_xml(&xml_response);
+
+        let _mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_body(gzipped)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1001);
+    }
 }

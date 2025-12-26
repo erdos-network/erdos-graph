@@ -3,6 +3,7 @@
 //! This module coordinates scraping from ArXiv, DBLP, and zbMATH, managing
 //! checkpointing, chunking large date ranges, and ingesting results into the database.
 
+use crate::config::{Config, load_config};
 use crate::db::ingestion::{get_checkpoint, ingest_publication, set_checkpoint};
 use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
 use crate::utilities::generate_chunks;
@@ -42,13 +43,16 @@ pub async fn run_scrape(
     source: Option<&str>,
     datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Determine which sources to scrape (specific source or all)
-    let sources = source
-        .map(|s| vec![s])
-        .unwrap_or_else(|| vec!["arxiv", "dblp", "zbmath"]);
+    // Determine which sources to scrape
+    let sources: Vec<String> = if let Some(src) = source {
+        vec![src.to_string()]
+    } else {
+        let config: Config = load_config()?;
+        config.scrapers.enabled.clone()
+    };
 
-    for src in sources {
-        let last_checkpoint = get_checkpoint(src)?;
+    for src in &sources {
+        let last_checkpoint = get_checkpoint(src.as_str())?;
 
         // Determine effective date range based on mode
         let effective_start = match mode {
@@ -63,8 +67,8 @@ pub async fn run_scrape(
 
         // Process each chunk and update checkpoint after success
         for (chunk_start, chunk_end) in chunks {
-            run_chunk(src, chunk_start, chunk_end, datastore).await?;
-            set_checkpoint(src, chunk_end)?;
+            run_chunk(src.as_str(), chunk_start, chunk_end, datastore).await?;
+            set_checkpoint(src.as_str(), chunk_end)?;
         }
     }
     Ok(())

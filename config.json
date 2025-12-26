@@ -1,0 +1,5 @@
+{
+  "scrapers": {
+    "enabled": ["arxiv", "dblp"]
+  }
+}
