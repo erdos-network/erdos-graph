@@ -1072,7 +1072,7 @@ mod tests {
 
     #[test]
     fn test_dblp_scraper_with_config() {
-        use crate::scrapers::dblp::{DblpScraper, DblpConfig};
+        use crate::scrapers::dblp::{DblpConfig, DblpScraper};
         let config = DblpConfig {
             base_url: "https://example.com/test.xml.gz".to_string(),
         };
@@ -1091,9 +1091,9 @@ mod tests {
     async fn test_dblp_scraper_trait_implementation() {
         use crate::scrapers::dblp::DblpScraper;
         use crate::scrapers::scraper::Scraper;
-        
+
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/Smith24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1117,10 +1117,10 @@ mod tests {
             base_url: server.url(),
         };
         let scraper = DblpScraper::with_config(config);
-        
+
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = scraper.scrape_range(start, end).await;
         assert!(result.is_ok());
     }
@@ -1130,7 +1130,7 @@ mod tests {
     #[tokio::test]
     async fn test_xml_element_with_pages() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/WithPages24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1152,7 +1152,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1162,7 +1162,7 @@ mod tests {
     #[tokio::test]
     async fn test_xml_element_with_volume() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/WithVolume24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1184,7 +1184,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1192,7 +1192,7 @@ mod tests {
     #[tokio::test]
     async fn test_xml_element_with_ee() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/WithEE24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1214,7 +1214,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1222,7 +1222,7 @@ mod tests {
     #[tokio::test]
     async fn test_xml_element_with_number() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/WithNumber24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1244,7 +1244,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1252,7 +1252,7 @@ mod tests {
     #[tokio::test]
     async fn test_xml_element_with_crossref() {
         let mut server = Server::new_async().await;
-        
+
         let inproceedings = r#"
 <inproceedings key="conf/test/Paper24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1274,7 +1274,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1282,7 +1282,7 @@ mod tests {
     #[tokio::test]
     async fn test_xml_element_with_nested_unknown() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/NestedUnknown24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1308,7 +1308,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1318,7 +1318,7 @@ mod tests {
     #[tokio::test]
     async fn test_title_with_cdata() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/CDATA24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1339,7 +1339,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1351,7 +1351,7 @@ mod tests {
     #[tokio::test]
     async fn test_author_with_cdata() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/CDATAAuthor24" mdate="2024-01-01">
     <author><![CDATA[Smith & Jones]]></author>
@@ -1372,7 +1372,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1386,7 +1386,7 @@ mod tests {
     #[tokio::test]
     async fn test_article_missing_title() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/NoTitle24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1406,7 +1406,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1417,7 +1417,7 @@ mod tests {
     #[tokio::test]
     async fn test_article_missing_author() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/NoAuthor24" mdate="2024-01-01">
     <title>Article Without Author</title>
@@ -1437,7 +1437,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1448,7 +1448,7 @@ mod tests {
     #[tokio::test]
     async fn test_article_missing_year() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/NoYear24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1468,7 +1468,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1479,7 +1479,7 @@ mod tests {
     #[tokio::test]
     async fn test_article_empty_title() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/EmptyTitle24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1500,7 +1500,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1513,7 +1513,7 @@ mod tests {
     #[tokio::test]
     async fn test_book_element_ignored() {
         let mut server = Server::new_async().await;
-        
+
         let book = r#"
 <book key="books/test/Book24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1534,7 +1534,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1545,7 +1545,7 @@ mod tests {
     #[tokio::test]
     async fn test_proceedings_element_ignored() {
         let mut server = Server::new_async().await;
-        
+
         let proceedings = r#"
 <proceedings key="conf/test/2024" mdate="2024-01-01">
     <editor>Test Editor</editor>
@@ -1566,7 +1566,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1577,7 +1577,7 @@ mod tests {
     #[tokio::test]
     async fn test_mixed_publication_types() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/Article24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1585,14 +1585,14 @@ mod tests {
     <year>2024</year>
     <journal>Test Journal</journal>
 </article>"#;
-        
+
         let book = r#"
 <book key="books/test/Book24" mdate="2024-01-01">
     <author>Test Author</author>
     <title>Test Book</title>
     <year>2024</year>
 </book>"#;
-        
+
         let inproceedings = r#"
 <inproceedings key="conf/test/Paper24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1613,7 +1613,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1626,7 +1626,7 @@ mod tests {
     #[tokio::test]
     async fn test_public_scrape_range() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/Public24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1650,7 +1650,7 @@ mod tests {
         // Instead, we test the trait implementation which calls the internal function
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1660,7 +1660,7 @@ mod tests {
     #[tokio::test]
     async fn test_parse_element_with_invalid_year() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/InvalidYear24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1681,7 +1681,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1692,7 +1692,7 @@ mod tests {
     #[tokio::test]
     async fn test_parse_element_with_malformed_xml_in_content() {
         let mut server = Server::new_async().await;
-        
+
         // This has unclosed tags in the content but is still valid XML structure
         let article = r#"
 <article key="journals/test/Malformed24" mdate="2024-01-01">
@@ -1714,7 +1714,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1722,7 +1722,7 @@ mod tests {
     #[tokio::test]
     async fn test_truncated_xml_element() {
         let mut server = Server::new_async().await;
-        
+
         // XML with a truncated article element (missing closing tag)
         // The scraper handles individual element errors gracefully and continues
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1732,7 +1732,7 @@ mod tests {
     <title>Truncated Article
 </dblp>"#;
 
-        let gzipped = create_gzipped_xml(&xml);
+        let gzipped = create_gzipped_xml(xml);
 
         let _mock = server
             .mock("GET", "/")
@@ -1743,7 +1743,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         // The scraper handles element-level errors gracefully and continues processing
         assert!(result.is_ok());
@@ -1755,7 +1755,7 @@ mod tests {
     #[tokio::test]
     async fn test_deeply_nested_unknown_elements() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/DeeplyNested24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1787,7 +1787,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1797,7 +1797,7 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_articles_some_invalid() {
         let mut server = Server::new_async().await;
-        
+
         let valid_article1 = r#"
 <article key="journals/test/Valid1" mdate="2024-01-01">
     <author>Author One</author>
@@ -1805,14 +1805,14 @@ mod tests {
     <year>2024</year>
     <journal>Test Journal</journal>
 </article>"#;
-        
+
         let invalid_article = r#"
 <article key="journals/test/Invalid" mdate="2024-01-01">
     <title>Missing Author</title>
     <year>2024</year>
     <journal>Test Journal</journal>
 </article>"#;
-        
+
         let valid_article2 = r#"
 <article key="journals/test/Valid2" mdate="2024-01-01">
     <author>Author Two</author>
@@ -1821,7 +1821,8 @@ mod tests {
     <journal>Test Journal</journal>
 </article>"#;
 
-        let xml_response = create_dblp_xml_response(&[valid_article1, invalid_article, valid_article2]);
+        let xml_response =
+            create_dblp_xml_response(&[valid_article1, invalid_article, valid_article2]);
         let gzipped = create_gzipped_xml(&xml_response);
 
         let _mock = server
@@ -1833,7 +1834,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1844,7 +1845,7 @@ mod tests {
     #[tokio::test]
     async fn test_author_whitespace_trimming() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/Whitespace24" mdate="2024-01-01">
     <author>   John Smith   </author>
@@ -1868,7 +1869,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1881,7 +1882,7 @@ mod tests {
     #[tokio::test]
     async fn test_title_whitespace_trimming() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/TitleWhitespace24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1904,7 +1905,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1916,7 +1917,7 @@ mod tests {
     #[tokio::test]
     async fn test_article_with_url_element() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/WithURL24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1938,7 +1939,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
     }
@@ -1946,7 +1947,7 @@ mod tests {
     #[tokio::test]
     async fn test_inproceedings_without_booktitle() {
         let mut server = Server::new_async().await;
-        
+
         let inproceedings = r#"
 <inproceedings key="conf/test/NoBooktitle24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1966,7 +1967,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -1977,7 +1978,7 @@ mod tests {
     #[tokio::test]
     async fn test_article_without_journal() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <article key="journals/test/NoJournal24" mdate="2024-01-01">
     <author>Test Author</author>
@@ -1997,7 +1998,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -2008,7 +2009,7 @@ mod tests {
     #[tokio::test]
     async fn test_xml_comments_ignored() {
         let mut server = Server::new_async().await;
-        
+
         let article = r#"
 <!-- This is a comment -->
 <article key="journals/test/WithComments24" mdate="2024-01-01">
@@ -2032,7 +2033,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
@@ -2042,7 +2043,7 @@ mod tests {
     #[tokio::test]
     async fn test_large_dataset_progress_reporting() {
         let mut server = Server::new_async().await;
-        
+
         // Generate 1001 articles to trigger progress reporting
         let mut articles = Vec::new();
         for i in 0..1001 {
@@ -2057,7 +2058,7 @@ mod tests {
                 i, i, i
             ));
         }
-        
+
         let article_refs: Vec<&str> = articles.iter().map(|s| s.as_str()).collect();
         let xml_response = create_dblp_xml_response(&article_refs);
         let gzipped = create_gzipped_xml(&xml_response);
@@ -2071,7 +2072,7 @@ mod tests {
 
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 12, 31, 23, 59, 59).unwrap();
-        
+
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
