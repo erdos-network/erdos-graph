@@ -227,4 +227,269 @@ mod tests {
         while queue.dequeue().is_some() {}
         assert_eq!(queue.queue_size(), 0);
     }
+
+    #[test]
+    fn test_queue_config_default() {
+        let config = QueueConfig::default();
+        assert_eq!(config.max_queue_size, 10000);
+    }
+
+    #[test]
+    fn test_queue_config_custom() {
+        let config = QueueConfig {
+            max_queue_size: 100,
+        };
+        assert_eq!(config.max_queue_size, 100);
+    }
+
+    #[test]
+    fn test_queue_config_clone() {
+        let config = QueueConfig {
+            max_queue_size: 500,
+        };
+        let cloned = config.clone();
+        assert_eq!(cloned.max_queue_size, 500);
+    }
+
+    #[test]
+    fn test_new_queue_empty() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        assert_eq!(queue.queue_size(), 0);
+        assert_eq!(queue.active_producer_count(), 0);
+        assert!(!queue.producers_finished());
+    }
+
+    #[test]
+    fn test_register_multiple_producers() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        queue.register_producer();
+        queue.register_producer();
+        queue.register_producer();
+
+        assert_eq!(queue.active_producer_count(), 3);
+        assert!(!queue.producers_finished());
+    }
+
+    #[test]
+    fn test_unregister_more_than_registered() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        queue.register_producer();
+        assert_eq!(queue.active_producer_count(), 1);
+
+        queue.unregister_producer();
+        assert_eq!(queue.active_producer_count(), 0);
+        assert!(queue.producers_finished());
+
+        // Unregister again - should saturate at 0
+        queue.unregister_producer();
+        assert_eq!(queue.active_producer_count(), 0);
+        assert!(queue.producers_finished());
+    }
+
+    #[test]
+    fn test_enqueue_dequeue_single_item() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+
+        let record = create_test_record("single");
+        queue.enqueue(record).unwrap();
+
+        assert_eq!(queue.queue_size(), 1);
+
+        let dequeued = queue.dequeue().unwrap();
+        assert_eq!(dequeued.id, "single");
+
+        assert_eq!(queue.queue_size(), 0);
+        assert_eq!(queue.dequeue(), None);
+    }
+
+    #[test]
+    fn test_multiple_dequeues_on_empty() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        assert_eq!(queue.dequeue(), None);
+        assert_eq!(queue.dequeue(), None);
+        assert_eq!(queue.dequeue(), None);
+    }
+
+    #[test]
+    fn test_producer_handle_enqueue_multiple() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+
+        for i in 0..5 {
+            producer
+                .submit(create_test_record(&format!("item-{}", i)))
+                .unwrap();
+        }
+
+        assert_eq!(queue.queue_size(), 5);
+        assert_eq!(queue.active_producer_count(), 1);
+
+        drop(producer);
+
+        assert_eq!(queue.active_producer_count(), 0);
+        assert!(queue.producers_finished());
+    }
+
+    #[test]
+    fn test_multiple_producer_handles() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        let producer1 = queue.create_producer();
+        let producer2 = queue.create_producer();
+        let producer3 = queue.create_producer();
+
+        assert_eq!(queue.active_producer_count(), 3);
+
+        drop(producer1);
+        assert_eq!(queue.active_producer_count(), 2);
+        assert!(!queue.producers_finished());
+
+        drop(producer2);
+        assert_eq!(queue.active_producer_count(), 1);
+        assert!(!queue.producers_finished());
+
+        drop(producer3);
+        assert_eq!(queue.active_producer_count(), 0);
+        assert!(queue.producers_finished());
+    }
+
+    #[test]
+    fn test_backpressure_multiple_blocked_producers() {
+        let config = QueueConfig { max_queue_size: 3 };
+        let queue = ThreadSafeQueue::new(config);
+
+        // Fill queue to capacity
+        for i in 0..3 {
+            queue
+                .enqueue(create_test_record(&format!("{}", i)))
+                .unwrap();
+        }
+
+        // Launch multiple producers that will block
+        let mut handles = vec![];
+        for i in 0..3 {
+            let q = queue.clone();
+            let handle = thread::spawn(move || {
+                q.enqueue(create_test_record(&format!("blocked-{}", i)))
+                    .unwrap()
+            });
+            handles.push(handle);
+        }
+
+        thread::sleep(Duration::from_millis(100));
+
+        // Drain queue to unblock all producers
+        while queue.dequeue().is_some() {}
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(queue.queue_size(), 3);
+    }
+
+    #[test]
+    fn test_concurrent_enqueue_dequeue() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+
+        let queue_producer = queue.clone();
+        let producer_handle = thread::spawn(move || {
+            for i in 0..100 {
+                queue_producer
+                    .enqueue(create_test_record(&format!("{}", i)))
+                    .unwrap();
+            }
+        });
+
+        let queue_consumer = queue.clone();
+        let consumer_handle = thread::spawn(move || {
+            let mut count = 0;
+            while count < 100 {
+                if queue_consumer.dequeue().is_some() {
+                    count += 1;
+                }
+            }
+            count
+        });
+
+        producer_handle.join().unwrap();
+        let consumed = consumer_handle.join().unwrap();
+
+        assert_eq!(consumed, 100);
+    }
+
+    #[test]
+    fn test_queue_size_during_operations() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+
+        assert_eq!(queue.queue_size(), 0);
+
+        queue.enqueue(create_test_record("1")).unwrap();
+        assert_eq!(queue.queue_size(), 1);
+
+        queue.enqueue(create_test_record("2")).unwrap();
+        assert_eq!(queue.queue_size(), 2);
+
+        queue.dequeue();
+        assert_eq!(queue.queue_size(), 1);
+
+        queue.dequeue();
+        assert_eq!(queue.queue_size(), 0);
+
+        queue.dequeue();
+        assert_eq!(queue.queue_size(), 0);
+    }
+
+    #[test]
+    fn test_producers_finished_flag() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        // Initially false (no producers registered yet)
+        assert!(!queue.producers_finished());
+
+        // Register and unregister
+        queue.register_producer();
+        assert!(!queue.producers_finished());
+
+        queue.unregister_producer();
+        assert!(queue.producers_finished());
+
+        // Register again - flag should remain true (once done, stays done)
+        queue.register_producer();
+        // Note: The flag doesn't reset when new producers register
+        // This is the current implementation behavior
+    }
+
+    #[test]
+    fn test_small_queue_size_config() {
+        let config = QueueConfig { max_queue_size: 1 };
+        let queue = ThreadSafeQueue::new(config);
+
+        queue.enqueue(create_test_record("1")).unwrap();
+
+        let q = queue.clone();
+        let handle = thread::spawn(move || q.enqueue(create_test_record("2")).unwrap());
+
+        thread::sleep(Duration::from_millis(100));
+
+        // Dequeue to make space
+        let item = queue.dequeue().unwrap();
+        assert_eq!(item.id, "1");
+
+        handle.join().unwrap();
+
+        assert_eq!(queue.queue_size(), 1);
+        let item = queue.dequeue().unwrap();
+        assert_eq!(item.id, "2");
+    }
 }

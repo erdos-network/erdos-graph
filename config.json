@@ -1,5 +1,7 @@
 {
   "scrapers": {
     "enabled": ["arxiv", "dblp"]
-  }
+  },
+  hearbeat_timeout_s: 30,
+  polling_interval_ms: 100,
 }

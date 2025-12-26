@@ -6,6 +6,8 @@ use std::fs;
 #[derive(Deserialize)]
 pub struct Config {
     pub scrapers: ScraperConfig,
+    pub heartbeat_timeout_s: u64,
+    pub polling_interval_ms: u64,
 }
 
 #[derive(Deserialize)]
