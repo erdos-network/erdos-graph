@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["run_chunk","run_scrape"]};
+window.SIDEBAR_ITEMS = {"fn":["run_scrape"]};
