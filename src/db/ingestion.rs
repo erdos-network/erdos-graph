@@ -38,7 +38,7 @@ pub fn find_or_create_person(
 /// Represents a publication scraped from an external source.
 ///
 /// This is the intermediate data structure used between scraping and database ingestion.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PublicationRecord {
     /// Source-specific identifier (e.g., "arxiv:2024.12345", DBLP key)
     pub id: String,
