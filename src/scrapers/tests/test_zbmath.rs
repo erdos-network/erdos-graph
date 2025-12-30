@@ -16,9 +16,7 @@ mod tests {
     ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
         let config = ZbmathConfig {
             base_url: mock_url.to_string(),
-            chunk_size_days: 7,
-            delay_between_chunks_ms: 1, // Fast for tests
-            delay_between_pages_ms: 1,  // Fast for tests
+            delay_between_pages_ms: 1, // Fast for tests
         };
         scrape_range_with_config(start, end, config).await
     }
@@ -32,8 +30,6 @@ mod tests {
     ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
         let config = ZbmathConfig {
             base_url: mock_url.to_string(),
-            chunk_size_days: 7,
-            delay_between_chunks_ms: 1,
             delay_between_pages_ms: 1,
         };
         scrape_chunk_with_config(client, start, end, &config).await
@@ -45,8 +41,6 @@ mod tests {
         let config = ZbmathConfig::default();
 
         assert_eq!(config.base_url, "https://oai.zbmath.org/v1/");
-        assert_eq!(config.chunk_size_days, 7);
-        assert_eq!(config.delay_between_chunks_ms, 1000);
         assert_eq!(config.delay_between_pages_ms, 500);
     }
 
@@ -55,14 +49,10 @@ mod tests {
     fn test_zbmath_config_custom() {
         let config = ZbmathConfig {
             base_url: "https://custom-zbmath.example.com/".to_string(),
-            chunk_size_days: 14,
-            delay_between_chunks_ms: 2000,
             delay_between_pages_ms: 1000,
         };
 
         assert_eq!(config.base_url, "https://custom-zbmath.example.com/");
-        assert_eq!(config.chunk_size_days, 14);
-        assert_eq!(config.delay_between_chunks_ms, 2000);
         assert_eq!(config.delay_between_pages_ms, 1000);
     }
 
@@ -73,11 +63,6 @@ mod tests {
         let config2 = config1.clone();
 
         assert_eq!(config1.base_url, config2.base_url);
-        assert_eq!(config1.chunk_size_days, config2.chunk_size_days);
-        assert_eq!(
-            config1.delay_between_chunks_ms,
-            config2.delay_between_chunks_ms
-        );
         assert_eq!(
             config1.delay_between_pages_ms,
             config2.delay_between_pages_ms
@@ -751,9 +736,9 @@ mod tests {
         // - Review text extraction (if applicable)
     }
 
-    /// Test scrape_range function with single chunk
+    /// Test scrape_range function with a date range
     #[tokio::test]
-    async fn test_scrape_range_single_chunk() {
+    async fn test_scrape_range_single_range() {
         let mut server = Server::new_async().await;
 
         let mock_response = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -793,7 +778,7 @@ mod tests {
             .create_async()
             .await;
 
-        // Test with a 2-day range (smaller than 7-day chunk size)
+        // Test with a 2-day range
         let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2024, 1, 3, 0, 0, 0).unwrap();
 
@@ -805,98 +790,6 @@ mod tests {
         assert_eq!(records[0].title, "Range Test Paper");
         assert_eq!(records[0].authors, vec!["Range, Alice"]);
         assert_eq!(records[0].source, "zbmath");
-    }
-
-    /// Test scrape_range function with multiple chunks
-    #[tokio::test]
-    async fn test_scrape_range_multiple_chunks() {
-        let mut server = Server::new_async().await;
-
-        // First chunk response (Jan 1-7)
-        let first_chunk_response = r#"<?xml version="1.0" encoding="UTF-8"?>
-<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
-    <ListRecords>
-        <record>
-            <header>
-                <identifier>oai:zbmath.org:1111111</identifier>
-                <datestamp>2024-01-01</datestamp>
-            </header>
-            <metadata>
-                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
-                          xmlns:dc="http://purl.org/dc/elements/1.1/">
-                    <dc:title>First Chunk Paper</dc:title>
-                    <dc:creator>Chunk, First</dc:creator>
-                    <dc:date>2024</dc:date>
-                    <dc:source>Chunk Journal</dc:source>
-                </oai_dc:dc>
-            </metadata>
-        </record>
-    </ListRecords>
-</OAI-PMH>"#;
-
-        // Second chunk response (Jan 8-14)
-        let second_chunk_response = r#"<?xml version="1.0" encoding="UTF-8"?>
-<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
-    <ListRecords>
-        <record>
-            <header>
-                <identifier>oai:zbmath.org:2222222</identifier>
-                <datestamp>2024-01-08</datestamp>
-            </header>
-            <metadata>
-                <oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" 
-                          xmlns:dc="http://purl.org/dc/elements/1.1/">
-                    <dc:title>Second Chunk Paper</dc:title>
-                    <dc:creator>Chunk, Second</dc:creator>
-                    <dc:date>2024</dc:date>
-                    <dc:source>Chunk Journal</dc:source>
-                </oai_dc:dc>
-            </metadata>
-        </record>
-    </ListRecords>
-</OAI-PMH>"#;
-
-        // Mock first chunk request (Jan 1-7)
-        let _mock1 = server
-            .mock("GET", "/")
-            .match_query(Matcher::AllOf(vec![
-                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
-                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
-                Matcher::UrlEncoded("from".into(), "2024-01-01T00:00:00Z".into()),
-                Matcher::UrlEncoded("until".into(), "2024-01-08T00:00:00Z".into()),
-            ]))
-            .with_status(200)
-            .with_header("content-type", "text/xml")
-            .with_body(first_chunk_response)
-            .create_async()
-            .await;
-
-        // Mock second chunk request (Jan 8-15)
-        let _mock2 = server
-            .mock("GET", "/")
-            .match_query(Matcher::AllOf(vec![
-                Matcher::UrlEncoded("verb".into(), "ListRecords".into()),
-                Matcher::UrlEncoded("metadataPrefix".into(), "oai_dc".into()),
-                Matcher::UrlEncoded("from".into(), "2024-01-08T00:00:00Z".into()),
-                Matcher::UrlEncoded("until".into(), "2024-01-15T00:00:00Z".into()),
-            ]))
-            .with_status(200)
-            .with_header("content-type", "text/xml")
-            .with_body(second_chunk_response)
-            .create_async()
-            .await;
-
-        // Test with a 14-day range (should create 2 chunks of 7 days each)
-        let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-        let end = Utc.with_ymd_and_hms(2024, 1, 15, 0, 0, 0).unwrap();
-
-        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
-
-        assert!(result.is_ok());
-        let records = result.unwrap();
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].title, "First Chunk Paper");
-        assert_eq!(records[1].title, "Second Chunk Paper");
     }
 
     /// Test scrape_range function with empty results

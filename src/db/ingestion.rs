@@ -8,6 +8,9 @@ use indradb::{Database, Datastore};
 use std::fs;
 use std::path::Path;
 
+/// Type alias for date range chunks: a vector of (start, end) date tuples.
+type DateRangeChunks = Vec<(DateTime<Utc>, DateTime<Utc>)>;
+
 /// Represents a publication scraped from an external source.
 ///
 /// This is the intermediate data structure used between scraping and database ingestion.
@@ -72,7 +75,7 @@ pub fn set_checkpoint(source: &str, date: DateTime<Utc>) -> Result<(), Box<dyn s
 ///
 /// # Arguments
 /// * `mode` - Processing mode: "initial" (scrape last 10 years), "weekly" (incremental updates),
-///            or "full" (scrape everything from beginning)
+///   or "full" (scrape everything from beginning)
 /// * `source` - Optional specific source to scrape ("arxiv", "dblp", or "zbmath"), or None for all enabled sources
 /// * `datastore` - Mutable reference to the IndraDB datastore
 ///
@@ -193,7 +196,7 @@ fn chunk_date_range(
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     chunk_size_days: u64,
-) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>)>, Box<dyn std::error::Error>> {
+) -> Result<DateRangeChunks, Box<dyn std::error::Error>> {
     if start >= end {
         return Err("Start date must be before end date".into());
     }
