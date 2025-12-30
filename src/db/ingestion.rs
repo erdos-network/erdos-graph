@@ -109,8 +109,8 @@ pub async fn orchestrate_scraping_and_ingestion(
 
     // Run run_scrape for each chunk (all sources in parallel) and update checkpoints
     for (chunk_start, chunk_end) in chunks {
-        // Pass source parameter to run_scrape (None = all sources in parallel, Some = specific source)
-        run_scrape(chunk_start, chunk_end, source, datastore).await?;
+        // Pass sources list to run_scrape
+        run_scrape(chunk_start, chunk_end, sources.clone(), datastore).await?;
 
         // Update checkpoints for all sources that were processed
         for src in &sources {

@@ -19,14 +19,14 @@ use tokio::time::{self, Instant};
 /// Orchestrates the complete scraping process for one or more publication sources.
 ///
 /// This function handles:
-/// - Spawning child processes to scrape from configured sources
+/// - Spawning child processes to scrape from specified sources
 /// - Collecting scraped publication records via a thread-safe queue
 /// - Ingesting records into the database
 ///
 /// # Arguments
 /// * `start_date` - Start date for scraping
 /// * `end_date` - End date for scraping
-/// * `source` - Optional specific source to scrape ("arxiv", "dblp", or "zbmath"), or None for all
+/// * `sources` - List of sources to scrape ("arxiv", "dblp", or "zbmath")
 /// * `datastore` - Mutable reference to the IndraDB datastore
 ///
 /// # Returns
@@ -40,18 +40,11 @@ use tokio::time::{self, Instant};
 pub async fn run_scrape(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    source: Option<&str>,
+    sources: Vec<String>,
     _datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Load configuration
+    // Load configuration for heartbeat timeout and polling interval
     let config = load_config()?;
-
-    // Determine which sources to scrape
-    let sources: Vec<String> = if let Some(src) = source {
-        vec![src.to_string()]
-    } else {
-        config.scrapers.enabled.clone()
-    };
 
     // Define queue
     let queue = ThreadSafeQueue::new(QueueConfig::default());
