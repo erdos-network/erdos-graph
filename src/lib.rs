@@ -6,4 +6,3 @@ pub mod logger;
 pub mod scrapers;
 pub mod tests;
 pub mod thread_safe_queue;
-pub mod utilities;

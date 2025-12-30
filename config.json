@@ -2,6 +2,11 @@
   "scrapers": {
     "enabled": ["arxiv", "dblp"]
   },
-  hearbeat_timeout_s: 30,
-  polling_interval_ms: 100,
+  "ingestion": {
+    "chunk_size_days": 1,
+    "initial_start_date": "1932-01-01T00:00:00Z",
+    "weekly_days": 7
+  },
+  "heartbeat_timeout_s": 30,
+  "polling_interval_ms": 100
 }

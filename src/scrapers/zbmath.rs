@@ -1,8 +1,7 @@
 use crate::db::ingestion::PublicationRecord;
 use crate::scrapers::scraper::Scraper;
-use crate::utilities::generate_chunks;
 use async_trait::async_trait;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
@@ -49,8 +48,6 @@ impl Scraper for ZbmathScraper {
 #[derive(Clone, Debug)]
 pub struct ZbmathConfig {
     pub base_url: String,
-    pub chunk_size_days: i64,
-    pub delay_between_chunks_ms: u64,
     pub delay_between_pages_ms: u64,
 }
 
@@ -58,8 +55,6 @@ impl Default for ZbmathConfig {
     fn default() -> Self {
         Self {
             base_url: ZBMATH_BASE_URL.to_string(),
-            chunk_size_days: 7,
-            delay_between_chunks_ms: 1000,
             delay_between_pages_ms: 500,
         }
     }
@@ -143,14 +138,14 @@ pub(crate) struct OaiError {
 
 /// Scrapes publication records from zbMATH for a given date range.
 ///
-/// This function chunks large date ranges into smaller pieces to avoid overloading
-/// the zbMATH API. It handles pagination, rate limiting, and error responses.
+/// This function handles pagination, rate limiting, and error responses.
+/// Date range chunking is handled by the ingestion layer, so this function
+/// scrapes the entire provided date range.
 ///
 /// # Implementation Details
-/// - Chunks the date range into 7-day periods to keep API requests manageable
 /// - Makes requests to the zbMATH Open OAI-PMH API (<https://oai.zbmath.org/v1/>)
 /// - Handles pagination using resumption tokens (max 100 records per request)
-/// - Includes a 1-second delay between requests to be respectful to the API
+/// - Includes a delay between paginated requests to be respectful to the API
 /// - Parses XML responses using Dublin Core metadata format
 /// - Converts parsed data into `PublicationRecord` structs
 ///
@@ -173,11 +168,10 @@ pub(crate) struct OaiError {
 /// use chrono::{TimeZone, Utc};
 ///
 /// let start = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-/// let end = Utc.with_ymd_and_hms(2024, 1, 31, 23, 59, 59).unwrap();
+/// let end = Utc.with_ymd_and_hms(2024, 1, 8, 0, 0, 0).unwrap();
 /// let records = scrape_range(start, end).await?;
 /// println!("Found {} publications", records.len());
 /// ```
-/// Scrapes publication records from zbMATH for a given date range.
 pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
@@ -191,47 +185,14 @@ pub async fn scrape_range_with_config(
     end_date: DateTime<Utc>,
     config: ZbmathConfig,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    // Use configurable chunk size
-    let chunk_size = Duration::days(config.chunk_size_days);
-    let chunks = generate_chunks(start_date, end_date, chunk_size);
-
-    let mut all_records = Vec::new();
     let client = reqwest::Client::new();
-
-    println!(
-        "Scraping zbMATH from {} to {} in {} chunks",
-        start_date.format("%Y-%m-%d"),
-        end_date.format("%Y-%m-%d"),
-        chunks.len()
-    );
-
-    for (i, (chunk_start, chunk_end)) in chunks.iter().enumerate() {
-        println!(
-            "Processing chunk {}/{}: {} to {}",
-            i + 1,
-            chunks.len(),
-            chunk_start.format("%Y-%m-%d"),
-            chunk_end.format("%Y-%m-%d")
-        );
-
-        // Scrape this chunk with pagination
-        let chunk_records =
-            scrape_chunk_with_config(&client, *chunk_start, *chunk_end, &config).await?;
-        println!("Found {} records in chunk {}", chunk_records.len(), i + 1);
-
-        all_records.extend(chunk_records);
-
-        // Be respectful to the API - wait between chunks
-        if i < chunks.len() - 1 {
-            sleep(StdDuration::from_millis(config.delay_between_chunks_ms)).await;
-        }
-    }
-
-    println!("Total records scraped: {}", all_records.len());
-    Ok(all_records)
+    scrape_chunk_with_config(&client, start_date, end_date, &config).await
 }
 
-/// Scrapes a single date chunk with custom configuration.
+/// Scrapes a date range with custom configuration.
+///
+/// This function handles pagination for the given date range and processes
+/// all pages of results. Date range chunking is handled by the ingestion layer.
 pub async fn scrape_chunk_with_config(
     client: &reqwest::Client,
     start_date: DateTime<Utc>,
