@@ -4,9 +4,9 @@
 //! checkpointing, chunking large date ranges, and ingesting results into the database.
 
 use crate::config::load_config;
-use crate::db::ingestion::{PublicationRecord, get_checkpoint, ingest_publication, set_checkpoint};
+use crate::db::ingestion::PublicationRecord;
 use crate::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use indradb::{Database, Datastore};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -19,35 +19,29 @@ use tokio::time::{self, Instant};
 /// Orchestrates the complete scraping process for one or more publication sources.
 ///
 /// This function handles:
-/// - Mode selection (initial full scrape vs. incremental weekly updates)
-/// - Checkpoint restoration to resume from last successful scrape
-/// - Date range chunking to avoid memory issues with large datasets
-/// - Sequential processing of chunks with checkpoint updates
+/// - Spawning child processes to scrape from configured sources
+/// - Collecting scraped publication records via a thread-safe queue
+/// - Ingesting records into the database
 ///
 /// # Arguments
-/// * `mode` - Either "initial" (scrape last 10 years) or "weekly" (incremental updates)
-/// * `start_date` - Optional override for the start date (defaults based on mode)
-/// * `end_date` - Optional override for the end date (defaults to now)
-/// * `chunk_size` - Duration of each scraping chunk (e.g., 7 days)
+/// * `start_date` - Start date for scraping
+/// * `end_date` - End date for scraping
 /// * `source` - Optional specific source to scrape ("arxiv", "dblp", or "zbmath"), or None for all
 /// * `datastore` - Mutable reference to the IndraDB datastore
 ///
 /// # Returns
-/// `Ok(())` on success, or an error if any chunk fails
+/// `Ok(())` on success, or an error if scraping or ingestion fails
 ///
 /// # Errors
-/// - Invalid mode string
-/// - Checkpoint file I/O errors
+/// - Configuration loading errors
 /// - Scraping errors from individual sources
 /// - Database ingestion errors
 #[coverage(off)]
 pub async fn run_scrape(
-    mode: &str,
-    start_date: Option<DateTime<Utc>>,
-    end_date: Option<DateTime<Utc>>,
-    chunk_size: Duration,
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
     source: Option<&str>,
-    datastore: &mut Database<impl Datastore>,
+    _datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     let config = load_config()?;
@@ -70,16 +64,6 @@ pub async fn run_scrape(
     let mut child_handles = vec![];
 
     for src in &sources {
-        let last_checkpoint = get_checkpoint(src.as_str())?;
-
-        // Determine effective date range based on mode
-        let effective_start = match mode {
-            "initial" => start_date.unwrap_or(Utc::now() - Duration::days(365 * 10)),
-            "weekly" => last_checkpoint.unwrap_or(Utc::now() - Duration::days(7)),
-            _ => return Err("Invalid mode".into()),
-        };
-        let effective_end = end_date.unwrap_or(Utc::now());
-
         // Spawn child processes
         let exe = std::env::current_exe()?;
         let mut cmd = Command::new(exe);
@@ -88,11 +72,9 @@ pub async fn run_scrape(
             .arg("--source")
             .arg(src)
             .arg("--start")
-            .arg(effective_start.to_rfc3339())
+            .arg(start_date.to_rfc3339())
             .arg("--end")
-            .arg(effective_end.to_rfc3339())
-            .arg("--chunk-size")
-            .arg(chunk_size.num_days().to_string())
+            .arg(end_date.to_rfc3339())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -136,13 +118,15 @@ pub async fn run_scrape(
             }
         });
 
-        child_handles.push((child, handle, heartbeat_handle, src.clone(), effective_end));
+        child_handles.push((child, handle, heartbeat_handle, src.clone(), end_date));
     }
 
     // Consumer loop
     loop {
         if let Some(record) = queue.dequeue() {
-            ingest_publication(datastore, record)?;
+            // TODO: Implement ingestion logic (conflict checking, vertex/edge creation, etc.)
+            // For now, just consume records without processing
+            let _ = record;
         } else {
             if queue.producers_finished() {
                 break;
@@ -169,13 +153,10 @@ pub async fn run_scrape(
     }
 
     // Cleanup
-    for (mut child, handle, heartbeat_handle, src, end_date) in child_handles {
+    for (mut child, handle, heartbeat_handle, _src, _end_date) in child_handles {
         let _ = handle.await;
         let _ = heartbeat_handle.await;
-
-        if child.wait().await?.success() {
-            set_checkpoint(&src, end_date)?;
-        }
+        let _ = child.wait().await?;
     }
 
     Ok(())

@@ -1,39 +1,12 @@
-//! Publication ingestion and deduplication logic.
+//! Publication ingestion orchestration and checkpointing logic.
 //!
-//! This module handles the ingestion of scraped publications into the graph database,
-//! including conflict detection, person lookup/creation, and checkpointing.
+//! This module handles orchestrating the scraping process, including date range calculation,
+//! chunking, and checkpoint management.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use indradb::{Database, Datastore};
 use std::fs;
 use std::path::Path;
-use uuid::Uuid;
-
-/// Finds an existing Person vertex by name or creates a new one.
-///
-/// # Implementation Notes
-/// This stub should be replaced with logic that:
-/// - Queries the datastore for a Person vertex with matching name (or alias)
-/// - If found, returns the existing vertex UUID
-/// - If not found, creates a new Person vertex with the given name
-/// - Handles name normalization and alias management
-///
-/// # Arguments
-/// * `datastore` - Mutable reference to the graph database
-/// * `name` - The person's name to search for or create
-///
-/// # Returns
-/// The UUID of the found or newly created Person vertex
-#[coverage(off)]
-pub fn find_or_create_person(
-    _datastore: &mut Database<impl Datastore>,
-    _name: &str,
-) -> Result<Uuid, indradb::Error> {
-    // TODO: Implement person lookup with name normalization
-    // TODO: Check aliases for potential matches
-    // TODO: Create new Person vertex if not found
-    Ok(Uuid::new_v4()) // Stub: returns random UUID for now
-}
 
 /// Represents a publication scraped from an external source.
 ///
@@ -52,52 +25,6 @@ pub struct PublicationRecord {
     pub venue: Option<String>,
     /// Source database identifier ("arxiv", "dblp", or "zbmath")
     pub source: String,
-}
-
-/// Checks if a publication already exists in the database to avoid duplicates.
-///
-/// # Implementation Notes
-/// This stub should be replaced with logic that:
-/// - Computes a hash of the publication (using `hash_publication` from utilities)
-/// - Queries the datastore for a Publication vertex with matching hash
-/// - Returns true if found, false otherwise
-///
-/// # Arguments
-/// * `datastore` - Reference to the graph database
-/// * `record` - The publication record to check
-///
-/// # Returns
-/// `true` if the publication already exists, `false` otherwise
-#[coverage(off)]
-pub fn check_conflict(
-    _datastore: &Database<impl Datastore>,
-    _record: &PublicationRecord,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    // TODO: Hash the publication record
-    // TODO: Query datastore for existing publication by hash
-    // TODO: Return true if found, false otherwise
-    Ok(false) // Placeholder: always says no conflict
-}
-
-/// Marks a publication as successfully ingested (for logging/metrics).
-///
-/// # Implementation Notes
-/// This stub should be replaced with logic that:
-/// - Logs the successful ingestion with timestamp
-/// - Updates metrics/counters for monitoring
-/// - Optionally stores ingestion metadata in the database
-///
-/// # Arguments
-/// * `datastore` - Mutable reference to the graph database
-/// * `record` - The publication record that was ingested
-#[coverage(off)]
-pub fn mark_ingested(
-    _datastore: &mut Database<impl Datastore>,
-    _record: &PublicationRecord,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: Log successful ingestion
-    // TODO: Update metrics
-    Ok(())
 }
 
 /// Retrieves the last checkpoint date for a specific scraping source.
@@ -136,40 +63,150 @@ pub fn set_checkpoint(source: &str, date: DateTime<Utc>) -> Result<(), Box<dyn s
     Ok(())
 }
 
-/// Ingests a publication record into the graph database.
+/// Orchestrates the complete scraping and ingestion process with chunked processing and checkpointing.
 ///
-/// # Implementation Notes
-/// This stub should be replaced with logic that:
-/// 1. Check for conflicts/duplicates using `check_conflict`
-/// 2. If duplicate, skip ingestion
-/// 3. Create a Publication vertex with title, year, venue properties
-/// 4. For each author, find or create a Person vertex
-/// 5. Create AUTHORED edges from each Person to the Publication
-/// 6. Update COAUTHORED_WITH edges between all pairs of authors
-/// 7. Mark as ingested for logging
+/// This function:
+/// 1. Calculates start and end dates based on mode using `calculate_date_range`
+/// 2. Breaks the date range into chunks using `chunk_date_range`
+/// 3. Calls `run_scrape` for each chunk
 ///
 /// # Arguments
-/// * `datastore` - Mutable reference to the graph database
-/// * `record` - The publication record to ingest
+/// * `mode` - Processing mode: "initial" (scrape last 10 years), "weekly" (incremental updates),
+///            or "full" (scrape everything from beginning)
+/// * `source` - Optional specific source to scrape ("arxiv", "dblp", or "zbmath"), or None for all enabled sources
+/// * `datastore` - Mutable reference to the IndraDB datastore
 ///
 /// # Returns
-/// `Ok(())` on success, or an error if database operations fail
+/// `Ok(())` on success, or an error if processing fails
 #[coverage(off)]
-pub fn ingest_publication(
+pub async fn orchestrate_scraping_and_ingestion(
+    mode: &str,
+    source: Option<&str>,
     datastore: &mut Database<impl Datastore>,
-    record: PublicationRecord,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if this publication already exists
-    if check_conflict(datastore, &record)? {
-        return Ok(()); // Skip duplicate
+    use crate::config::load_config;
+    use crate::scrapers::scraping_orchestrator::run_scrape;
+
+    // Load configuration
+    let config = load_config()?;
+
+    // Determine which sources to process
+    let sources: Vec<String> = if let Some(src) = source {
+        vec![src.to_string()]
+    } else {
+        config.scrapers.enabled.clone()
+    };
+
+    // Calculate start and end dates based on mode (source-agnostic, uses earliest checkpoint)
+    // Use the sources we're actually processing for checkpoint calculation
+    let (start_date, end_date) = calculate_date_range(mode, &sources, &config.ingestion)?;
+
+    // Break date range into chunks
+    let chunks = chunk_date_range(start_date, end_date, config.ingestion.chunk_size_days)?;
+
+    // Run run_scrape for each chunk (all sources in parallel) and update checkpoints
+    for (chunk_start, chunk_end) in chunks {
+        // Pass source parameter to run_scrape (None = all sources in parallel, Some = specific source)
+        run_scrape(chunk_start, chunk_end, source, datastore).await?;
+
+        // Update checkpoints for all sources that were processed
+        for src in &sources {
+            set_checkpoint(src, chunk_end)?;
+        }
     }
 
-    // TODO: Create Publication vertex with properties from schema.rs
-    // TODO: For each author, call find_or_create_person
-    // TODO: Create AUTHORED edges from Person vertices to Publication vertex
-    // TODO: Create or update COAUTHORED_WITH edges between all author pairs
-    // TODO: Set edge weights and publication_ids properties
-
-    mark_ingested(datastore, &record)?;
     Ok(())
+}
+
+/// Calculates the date range for scraping based on mode and existing checkpoints.
+///
+/// This function is source-agnostic and uses the earliest checkpoint across all sources,
+/// or calculates based on mode if no checkpoints exist.
+///
+/// # Arguments
+/// * `mode` - Processing mode: "initial", "weekly", or "full"
+/// * `sources` - List of source identifiers to check for checkpoints
+/// * `config` - Configuration containing time range settings
+///
+/// # Returns
+/// A tuple of (start_date, end_date)
+#[coverage(off)]
+fn calculate_date_range(
+    mode: &str,
+    sources: &[String],
+    config: &crate::config::IngestionConfig,
+) -> Result<(DateTime<Utc>, DateTime<Utc>), Box<dyn std::error::Error>> {
+    let now = Utc::now();
+
+    // Find the earliest checkpoint across all sources
+    let mut earliest_checkpoint: Option<DateTime<Utc>> = None;
+    for source in sources {
+        if let Some(checkpoint) = get_checkpoint(source)? {
+            earliest_checkpoint = match earliest_checkpoint {
+                Some(earliest) => Some(std::cmp::min(earliest, checkpoint)),
+                None => Some(checkpoint),
+            };
+        }
+    }
+
+    let start_date = match mode {
+        "initial" => {
+            if let Some(checkpoint) = earliest_checkpoint {
+                checkpoint
+            } else {
+                // Use the configured start date (Erdos' first known publication, January 1932)
+                DateTime::parse_from_rfc3339(&config.initial_start_date)?.with_timezone(&Utc)
+            }
+        }
+        "weekly" => {
+            if let Some(checkpoint) = earliest_checkpoint {
+                checkpoint
+            } else {
+                now - Duration::days(config.weekly_days as i64)
+            }
+        }
+        "full" => {
+            if let Some(checkpoint) = earliest_checkpoint {
+                checkpoint
+            } else {
+                // Start from a very early date (e.g., 1900)
+                DateTime::parse_from_rfc3339("1900-01-01T00:00:00Z")?.with_timezone(&Utc)
+            }
+        }
+        _ => return Err(format!("Invalid mode: {}", mode).into()),
+    };
+
+    Ok((start_date, now))
+}
+
+/// Breaks a date range into smaller time-based chunks.
+///
+/// # Arguments
+/// * `start` - Start date of the range
+/// * `end` - End date of the range
+/// * `chunk_size_days` - Size of each chunk in days
+///
+/// # Returns
+/// A vector of (chunk_start, chunk_end) tuples
+#[coverage(off)]
+fn chunk_date_range(
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    chunk_size_days: u64,
+) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>)>, Box<dyn std::error::Error>> {
+    if start >= end {
+        return Err("Start date must be before end date".into());
+    }
+
+    let mut chunks = Vec::new();
+    let chunk_duration = Duration::days(chunk_size_days as i64);
+    let mut current_start = start;
+
+    while current_start < end {
+        let chunk_end = std::cmp::min(current_start + chunk_duration, end);
+        chunks.push((current_start, chunk_end));
+        current_start = chunk_end;
+    }
+
+    Ok(chunks)
 }
