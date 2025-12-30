@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["check_conflict","find_or_create_person","get_checkpoint","ingest_publication","mark_ingested","set_checkpoint"],"struct":["PublicationRecord"]};
+window.SIDEBAR_ITEMS = {"fn":["get_checkpoint","orchestrate_scraping_and_ingestion","set_checkpoint"],"struct":["PublicationRecord"]};

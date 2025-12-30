@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["test_thread_safe_queue","test_utilities"]};
+window.SIDEBAR_ITEMS = {"mod":["test_thread_safe_queue"]};
