@@ -13,9 +13,12 @@ use indradb::{
 };
 use serde_json::json;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::Deref;
 use std::process::Stdio;
 use std::sync::Arc;
+use textdistance::Algorithm;
+use textdistance::Cosine;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -197,12 +200,173 @@ async fn ingest_publication(
 }
 
 /// Checks if a publication record already exists in the database.
-fn publication_exists(record: &PublicationRecord, _datastore: &Database<impl Datastore>) -> bool {
-    // Check DOI or ArXiV ID existence
+pub(crate) fn publication_exists(
+    record: &PublicationRecord,
+    datastore: &Database<impl Datastore>,
+) -> bool {
+    // Load config for thresholds
+    let config = match load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to load config for deduplication: {}", e);
+            return false;
+        }
+    };
 
-    // Check tokenized cosine similarity for title and jaccard similarity for authors
+    // Check exact match on publication_id
+    if let Ok(id_prop) = Identifier::new("publication_id") {
+        let id_val = Json::new(json!(record.id));
+        let type_prop = match Identifier::new(crate::db::schema::PUBLICATION_TYPE) {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
 
-    return false;
+        if let Ok(q) = RangeVertexQuery::new()
+            .t(type_prop)
+            .with_property_equal_to(id_prop, id_val)
+        {
+            if let Ok(results) = datastore.get(q) {
+                if let Some(QueryOutputValue::Vertices(v)) = results.first() {
+                    if !v.is_empty() {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fuzzy match within the same year
+    let year_prop = match Identifier::new("year") {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let year_val = Json::new(json!(record.year.to_string()));
+    let type_prop = match Identifier::new(crate::db::schema::PUBLICATION_TYPE) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+
+    // Query for papers in the same year and get their properties
+    let q_year = match RangeVertexQuery::new()
+        .t(type_prop)
+        .with_property_equal_to(year_prop, year_val)
+    {
+        Ok(q) => q,
+        Err(_) => return false,
+    };
+
+    let q_props = match q_year.properties() {
+        Ok(q) => q,
+        Err(_) => return false,
+    };
+
+    let results = match datastore.get(q_props) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+
+    // Check each candidate publication for title and author similarity
+    if let Some(QueryOutputValue::VertexProperties(vps)) = results.first() {
+        let title_prop_name = match Identifier::new("title") {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+
+        for vp in vps {
+            // Check title similarity
+            if let Some(title_val) = vp.props.iter().find(|p| p.name == title_prop_name) {
+                let db_title = match title_val.value.as_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+
+                let cosine = Cosine::default();
+                let db_title_norm = db_title.to_lowercase();
+                let record_title_norm = record.title.to_lowercase();
+                let similarity = cosine.for_str(&record_title_norm, &db_title_norm).nval();
+
+                if similarity >= config.deduplication.title_similarity_threshold {
+                    // Title matches, check authors
+                    if check_authors_similarity(
+                        &vp.vertex.id,
+                        &record.authors,
+                        datastore,
+                        config.deduplication.author_similarity_threshold,
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Helper to check author similarity for a candidate publication
+fn check_authors_similarity(
+    pub_id: &uuid::Uuid,
+    new_authors: &[String],
+    datastore: &Database<impl Datastore>,
+    threshold: f64,
+) -> bool {
+    // Fetch authors of the existing publication
+    // Query: SpecificVertex(pub) -> Inbound (AUTHORED) -> Outbound Vertex (Author) -> Properties
+    let q = SpecificVertexQuery::single(*pub_id);
+    let q_edges = match q.inbound() {
+        Ok(q) => q,
+        Err(_) => return false,
+    };
+    let q_authors = match q_edges.outbound() {
+        Ok(q) => q,
+        Err(_) => return false,
+    };
+
+    let q_props = match q_authors.properties() {
+        Ok(q) => q,
+        Err(_) => return false,
+    };
+
+    let results = match datastore.get(q_props) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+
+    let mut db_authors = HashSet::new();
+    if let Some(QueryOutputValue::VertexProperties(vps)) = results.first() {
+        let name_prop = match Identifier::new("name") {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+
+        for vp in vps {
+            if let Some(val) = vp.props.iter().find(|p| p.name == name_prop) {
+                if let Some(name) = val.value.as_str() {
+                    db_authors.insert(name.to_lowercase());
+                }
+            }
+        }
+    }
+
+    if db_authors.is_empty() && new_authors.is_empty() {
+        return true;
+    }
+    if db_authors.is_empty() || new_authors.is_empty() {
+        return false;
+    }
+
+    let new_authors_set: HashSet<String> = new_authors.iter().map(|s| s.to_lowercase()).collect();
+
+    let intersection = db_authors.intersection(&new_authors_set).count();
+    let union = db_authors.union(&new_authors_set).count();
+
+    let jaccard = if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    };
+
+    jaccard >= threshold
 }
 
 /// Adds a publication record to the database.

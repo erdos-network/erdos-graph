@@ -3,10 +3,11 @@ mod tests {
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::scraping_orchestrator::{
         add_publication, create_authored_edge, create_coauthor_edge, get_or_create_author_vertex,
+        publication_exists,
     };
     use crate::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use indradb::{
-        AllEdgeQuery, Database, Edge, Identifier, QueryExt, QueryOutputValue, RangeVertexQuery,
+        AllEdgeQuery, Edge, Identifier, QueryExt, QueryOutputValue, RangeVertexQuery,
         RocksdbDatastore, SpecificEdgeQuery, SpecificVertexQuery,
     };
     use std::collections::HashMap;
@@ -565,7 +566,7 @@ mod tests {
         let author1 = get_or_create_author_vertex("Alice", &mut database).unwrap();
         let author2 = get_or_create_author_vertex("Bob", &mut database).unwrap();
 
-        // Create initial edge
+        // 1. Create initial edge
         create_coauthor_edge(&author1, &author2, &mut database).unwrap();
 
         // Verify edge and weight
@@ -592,7 +593,7 @@ mod tests {
 
         assert_eq!(weight, 1);
 
-        // Increment weight
+        // 2. Increment weight (simulate second collaboration)
         create_coauthor_edge(&author1, &author2, &mut database).unwrap();
 
         let q = SpecificEdgeQuery::single(expected_edge.clone())
@@ -612,5 +613,85 @@ mod tests {
             .unwrap();
 
         assert_eq!(weight, 2);
+    }
+
+    /// Test publication deduplication
+    #[test]
+    fn test_publication_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_dedup.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        // Setup indexes required for publication_exists
+        database
+            .index_property(Identifier::new("publication_id").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("year").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap(); // For author lookup
+
+        // Test Exact ID Match
+        let record1 = PublicationRecord {
+            id: "arxiv:1234".to_string(),
+            title: "Original Title".to_string(),
+            authors: vec!["Author A".to_string()],
+            year: 2020,
+            venue: None,
+            source: "arxiv".to_string(),
+        };
+        add_publication(&record1, &mut database).unwrap();
+
+        // Should exist
+        assert!(publication_exists(&record1, &database));
+
+        // Test Fuzzy Match
+        let record2 = PublicationRecord {
+            id: "arxiv:5678".to_string(),          // Different ID
+            title: "Original Title".to_string(),   // Same title
+            authors: vec!["Author A".to_string()], // Same author
+            year: 2020,                            // Same year
+            venue: None,
+            source: "arxiv".to_string(),
+        };
+
+        // Ensure the author is linked to the first publication for author check to pass
+        let author_v = get_or_create_author_vertex("Author A", &mut database).unwrap();
+
+        // Find record1 vertex
+        let pub1_q = RangeVertexQuery::new().t(Identifier::new("Publication").unwrap());
+        let pub_res = database.get(pub1_q).unwrap();
+        let pub1 = match &pub_res[0] {
+            QueryOutputValue::Vertices(v) => v[0].clone(),
+            _ => panic!(),
+        };
+        create_authored_edge(&author_v, &pub1, &mut database).unwrap();
+
+        // Check if fuzzy match detects existing publication
+        assert!(publication_exists(&record2, &database));
+
+        // Test non-existent differing by title
+        let record3 = PublicationRecord {
+            id: "arxiv:9999".to_string(),
+            title: "Completely Different Title".to_string(),
+            authors: vec!["Author A".to_string()],
+            year: 2020,
+            venue: None,
+            source: "arxiv".to_string(),
+        };
+        assert!(!publication_exists(&record3, &database));
+
+        // Test non-existent differing by year
+        let record4 = PublicationRecord {
+            id: "arxiv:5555".to_string(),
+            title: "Original Title".to_string(),
+            authors: vec!["Author A".to_string()],
+            year: 2021, // Different year
+            venue: None,
+            source: "arxiv".to_string(),
+        };
+        assert!(!publication_exists(&record4, &database));
     }
 }

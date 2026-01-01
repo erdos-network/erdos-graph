@@ -7,8 +7,15 @@ use std::fs;
 pub struct Config {
     pub scrapers: ScraperConfig,
     pub ingestion: IngestionConfig,
+    pub deduplication: DeduplicationConfig,
     pub heartbeat_timeout_s: u64,
     pub polling_interval_ms: u64,
+}
+
+#[derive(Deserialize)]
+pub struct DeduplicationConfig {
+    pub title_similarity_threshold: f64,
+    pub author_similarity_threshold: f64,
 }
 
 #[derive(Deserialize)]
