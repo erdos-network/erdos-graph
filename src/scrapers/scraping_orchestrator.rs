@@ -200,6 +200,17 @@ async fn ingest_publication(
 }
 
 /// Checks if a publication record already exists in the database.
+///
+/// This performs two checks:
+/// 1. Exact match on `publication_id` (e.g., ArXiv ID)
+/// 2. Fuzzy match based on year, title similarity (Cosine), and author set similarity (Jaccard)
+///
+/// # Arguments
+/// * `record` - The publication record to check
+/// * `datastore` - Reference to the IndraDB datastore
+///
+/// # Returns
+/// `true` if a matching publication exists, `false` otherwise
 pub(crate) fn publication_exists(
     record: &PublicationRecord,
     datastore: &Database<impl Datastore>,
@@ -304,6 +315,15 @@ pub(crate) fn publication_exists(
 }
 
 /// Helper to check author similarity for a candidate publication
+///
+/// # Arguments
+/// * `pub_id` - The UUID of the existing publication in the database
+/// * `new_authors` - List of authors from the new candidate record
+/// * `datastore` - Reference to the IndraDB datastore
+/// * `threshold` - Jaccard similarity threshold (0.0 to 1.0)
+///
+/// # Returns
+/// `true` if the author sets are similar enough, `false` otherwise
 fn check_authors_similarity(
     pub_id: &uuid::Uuid,
     new_authors: &[String],
@@ -370,6 +390,18 @@ fn check_authors_similarity(
 }
 
 /// Adds a publication record to the database.
+///
+/// Creates a new `Publication` vertex and sets its properties.
+///
+/// # Arguments
+/// * `record` - The publication record to add
+/// * `datastore` - Mutable reference to the IndraDB datastore
+///
+/// # Returns
+/// The created Publication `Vertex`
+///
+/// # Errors
+/// Returns an error if database operations fail
 pub(crate) fn add_publication(
     record: &PublicationRecord,
     datastore: &mut Database<impl Datastore>,
@@ -399,6 +431,16 @@ pub(crate) fn add_publication(
 }
 
 /// Retrieves or creates an author vertex in the database.
+///
+/// # Arguments
+/// * `author_name` - The name of the author
+/// * `datastore` - Mutable reference to the IndraDB datastore
+///
+/// # Returns
+/// The existing or newly created Author `Vertex`
+///
+/// # Errors
+/// Returns an error if database operations fail
 pub(crate) fn get_or_create_author_vertex(
     author_name: &str,
     datastore: &mut Database<impl Datastore>,
@@ -447,6 +489,17 @@ pub(crate) fn get_or_create_author_vertex(
 }
 
 /// Creates an AUTHORED edge between an author and a publication.
+///
+/// # Arguments
+/// * `author` - The Author vertex
+/// * `publication` - The Publication vertex
+/// * `datastore` - Mutable reference to the IndraDB datastore
+///
+/// # Returns
+/// `Ok(())` on success
+///
+/// # Errors
+/// Returns an error if database operations fail
 pub(crate) fn create_authored_edge(
     author: &Vertex,
     publication: &Vertex,
@@ -462,7 +515,21 @@ pub(crate) fn create_authored_edge(
     Ok(())
 }
 
-/// Creates a COAUTHORED_WITH edge between two authors.
+/// Creates or updates a COAUTHORED_WITH edge between two authors.
+///
+/// If the edge already exists, its weight is incremented. Otherwise, a new edge
+/// is created with weight 1.
+///
+/// # Arguments
+/// * `author1` - The first Author vertex
+/// * `author2` - The second Author vertex
+/// * `datastore` - Mutable reference to the IndraDB datastore
+///
+/// # Returns
+/// `Ok(())` on success
+///
+/// # Errors
+/// Returns an error if database operations fail
 pub(crate) fn create_coauthor_edge(
     author1: &Vertex,
     author2: &Vertex,
