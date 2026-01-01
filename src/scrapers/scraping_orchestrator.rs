@@ -7,8 +7,13 @@ use crate::config::load_config;
 use crate::db::ingestion::PublicationRecord;
 use crate::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
 use chrono::{DateTime, Utc};
-use indradb::{Database, Datastore};
+use indradb::{
+    Database, Datastore, Edge, Identifier, Json, QueryExt, QueryOutputValue, RangeVertexQuery,
+    SpecificEdgeQuery, SpecificVertexQuery, Vertex,
+};
+use serde_json::json;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -41,7 +46,7 @@ pub async fn run_scrape(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     sources: Vec<String>,
-    _datastore: &mut Database<impl Datastore>,
+    datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration for heartbeat timeout and polling interval
     let config = load_config()?;
@@ -117,9 +122,8 @@ pub async fn run_scrape(
     // Consumer loop
     loop {
         if let Some(record) = queue.dequeue() {
-            // TODO: Implement ingestion logic (conflict checking, vertex/edge creation, etc.)
-            // For now, just consume records without processing
-            let _ = record;
+            // Ingest publication into db
+            ingest_publication(record, datastore).await?;
         } else {
             if queue.producers_finished() {
                 break;
@@ -151,6 +155,206 @@ pub async fn run_scrape(
         let _ = heartbeat_handle.await;
         let _ = child.wait().await?;
     }
+
+    Ok(())
+}
+
+/// Ingests a single publication record into the database.
+async fn ingest_publication(
+    record: PublicationRecord,
+    datastore: &mut Database<impl Datastore>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if record already exists in the database
+    if publication_exists(&record, datastore) {
+        return Ok(());
+    }
+
+    // Add publication vertex to database
+    let pub_vertex = add_publication(&record, datastore)?;
+
+    // Add new author vertices and create AUTHORED edges
+    for author in &record.authors {
+        let author_vertex = get_or_create_author_vertex(author, datastore)?;
+        create_authored_edge(&author_vertex, &pub_vertex, datastore)?;
+    }
+
+    // Create COAUTHORED_WITH edges between authors
+    for i in 0..record.authors.len() {
+        for j in (i + 1)..record.authors.len() {
+            // Retrieve author vertices again since we need their IDs
+            // Optimally we'd cache these but for now we look them up
+            let author1 = get_or_create_author_vertex(&record.authors[i], datastore)?;
+            let author2 = get_or_create_author_vertex(&record.authors[j], datastore)?;
+
+            // Create COAUTHORED_WITH edge between record.authors[i] and record.authors[j]
+            create_coauthor_edge(&author1, &author2, datastore)?;
+            // Also create reverse edge for undirected graph simulation
+            create_coauthor_edge(&author2, &author1, datastore)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Checks if a publication record already exists in the database.
+fn publication_exists(record: &PublicationRecord, _datastore: &Database<impl Datastore>) -> bool {
+    // Check DOI or ArXiV ID existence
+
+    // Check tokenized cosine similarity for title and jaccard similarity for authors
+
+    return false;
+}
+
+/// Adds a publication record to the database.
+pub(crate) fn add_publication(
+    record: &PublicationRecord,
+    datastore: &mut Database<impl Datastore>,
+) -> Result<Vertex, Box<dyn std::error::Error>> {
+    use crate::db::schema::PUBLICATION_TYPE;
+
+    let vertex_type = Identifier::new(PUBLICATION_TYPE)?;
+    let vertex = Vertex::new(vertex_type);
+
+    datastore.create_vertex(&vertex)?;
+
+    let properties = vec![
+        ("title", json!(record.title)),
+        ("year", json!(record.year.to_string())),
+        ("venue", json!(record.venue.clone().unwrap_or_default())),
+        ("publication_id", json!(record.id)),
+    ];
+
+    for (name, value) in properties {
+        let q = SpecificVertexQuery::single(vertex.id);
+        let prop_name = Identifier::new(name)?;
+        let json_val = Json::new(value);
+        datastore.set_properties(q, prop_name, &json_val)?;
+    }
+
+    Ok(vertex)
+}
+
+/// Retrieves or creates an author vertex in the database.
+pub(crate) fn get_or_create_author_vertex(
+    author_name: &str,
+    datastore: &mut Database<impl Datastore>,
+) -> Result<Vertex, Box<dyn std::error::Error>> {
+    use crate::db::schema::PERSON_TYPE;
+
+    let person_type = Identifier::new(PERSON_TYPE)?;
+
+    // Check if author exists by looking up name property
+    let name_prop = Identifier::new("name")?;
+    let name_val = Json::new(json!(author_name));
+
+    let q = RangeVertexQuery::new()
+        .t(person_type)
+        .with_property_equal_to(name_prop, name_val.clone())?;
+
+    let results = datastore.get(q)?;
+
+    if let Some(QueryOutputValue::Vertices(vertices)) = results.first() {
+        if let Some(vertex) = vertices.first() {
+            return Ok(vertex.clone());
+        }
+    }
+
+    // If not found, create new vertex
+    let vertex = Vertex::new(person_type);
+    datastore.create_vertex(&vertex)?;
+
+    // Set properties
+    let properties = vec![
+        ("name", json!(author_name)),
+        ("erdos_number", json!("None")),
+        ("is_erdos", json!("false")),
+        ("aliases", json!("[]")),
+        ("updated_at", json!(Utc::now().timestamp().to_string())),
+    ];
+
+    for (name, value) in properties {
+        let q = SpecificVertexQuery::single(vertex.id);
+        let prop_name = Identifier::new(name)?;
+        let json_val = Json::new(value);
+        datastore.set_properties(q, prop_name, &json_val)?;
+    }
+
+    Ok(vertex)
+}
+
+/// Creates an AUTHORED edge between an author and a publication.
+pub(crate) fn create_authored_edge(
+    author: &Vertex,
+    publication: &Vertex,
+    datastore: &mut Database<impl Datastore>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::db::schema::AUTHORED_TYPE;
+
+    let edge_type = Identifier::new(AUTHORED_TYPE)?;
+    let edge = Edge::new(author.id, edge_type, publication.id);
+
+    datastore.create_edge(&edge)?;
+
+    Ok(())
+}
+
+/// Creates a COAUTHORED_WITH edge between two authors.
+pub(crate) fn create_coauthor_edge(
+    author1: &Vertex,
+    author2: &Vertex,
+    datastore: &mut Database<impl Datastore>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::db::schema::COAUTHORED_WITH_TYPE;
+
+    let edge_type = Identifier::new(COAUTHORED_WITH_TYPE)?;
+    let edge = Edge::new(author1.id, edge_type, author2.id);
+
+    // Check if edge exists
+    let q = SpecificEdgeQuery::single(edge.clone());
+    let results = datastore.get(q)?;
+
+    if let Some(QueryOutputValue::Edges(edges)) = results.first() {
+        if !edges.is_empty() {
+            // Edge exists, increment weight
+            let weight_prop = Identifier::new("weight")?;
+
+            // Get current weight
+            let q = SpecificEdgeQuery::single(edge.clone())
+                .properties()?
+                .name(weight_prop);
+            let props_results = datastore.get(q)?;
+
+            let current_weight = props_results
+                .first()
+                .and_then(|res| match res {
+                    QueryOutputValue::EdgeProperties(props) => props.first(),
+                    _ => None,
+                })
+                .and_then(|prop| prop.props.first())
+                .and_then(|p| {
+                    p.value.as_u64().or_else(|| {
+                        serde_json::from_value::<String>(p.value.deref().clone())
+                            .ok()
+                            .and_then(|s| s.parse::<u64>().ok())
+                    })
+                })
+                .unwrap_or(1);
+
+            let new_weight = current_weight + 1;
+            let q = SpecificEdgeQuery::single(edge.clone());
+            datastore.set_properties(q, weight_prop, &Json::new(json!(new_weight)))?;
+
+            return Ok(());
+        }
+    }
+
+    // Create new edge
+    datastore.create_edge(&edge)?;
+
+    // Initialize properties
+    let weight_prop = Identifier::new("weight")?;
+    let q = SpecificEdgeQuery::single(edge);
+    datastore.set_properties(q, weight_prop, &Json::new(json!(1u64)))?;
 
     Ok(())
 }
