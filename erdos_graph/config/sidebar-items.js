@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["load_config"],"struct":["Config","IngestionConfig","ScraperConfig"]};
+window.SIDEBAR_ITEMS = {"fn":["load_config"],"struct":["Config","DeduplicationConfig","IngestionConfig","ScraperConfig"]};
