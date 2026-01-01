@@ -235,14 +235,11 @@ pub(crate) fn publication_exists(
         if let Ok(q) = RangeVertexQuery::new()
             .t(type_prop)
             .with_property_equal_to(id_prop, id_val)
+            && let Ok(results) = datastore.get(q)
+            && let Some(QueryOutputValue::Vertices(v)) = results.first()
+            && !v.is_empty()
         {
-            if let Ok(results) = datastore.get(q) {
-                if let Some(QueryOutputValue::Vertices(v)) = results.first() {
-                    if !v.is_empty() {
-                        return true;
-                    }
-                }
-            }
+            return true;
         }
     }
 
@@ -360,10 +357,10 @@ fn check_authors_similarity(
         };
 
         for vp in vps {
-            if let Some(val) = vp.props.iter().find(|p| p.name == name_prop) {
-                if let Some(name) = val.value.as_str() {
-                    db_authors.insert(name.to_lowercase());
-                }
+            if let Some(val) = vp.props.iter().find(|p| p.name == name_prop)
+                && let Some(name) = val.value.as_str()
+            {
+                db_authors.insert(name.to_lowercase());
             }
         }
     }
@@ -459,10 +456,10 @@ pub(crate) fn get_or_create_author_vertex(
 
     let results = datastore.get(q)?;
 
-    if let Some(QueryOutputValue::Vertices(vertices)) = results.first() {
-        if let Some(vertex) = vertices.first() {
-            return Ok(vertex.clone());
-        }
+    if let Some(QueryOutputValue::Vertices(vertices)) = results.first()
+        && let Some(vertex) = vertices.first()
+    {
+        return Ok(vertex.clone());
     }
 
     // If not found, create new vertex
@@ -544,39 +541,39 @@ pub(crate) fn create_coauthor_edge(
     let q = SpecificEdgeQuery::single(edge.clone());
     let results = datastore.get(q)?;
 
-    if let Some(QueryOutputValue::Edges(edges)) = results.first() {
-        if !edges.is_empty() {
-            // Edge exists, increment weight
-            let weight_prop = Identifier::new("weight")?;
+    if let Some(QueryOutputValue::Edges(edges)) = results.first()
+        && !edges.is_empty()
+    {
+        // Edge exists, increment weight
+        let weight_prop = Identifier::new("weight")?;
 
-            // Get current weight
-            let q = SpecificEdgeQuery::single(edge.clone())
-                .properties()?
-                .name(weight_prop);
-            let props_results = datastore.get(q)?;
+        // Get current weight
+        let q = SpecificEdgeQuery::single(edge.clone())
+            .properties()?
+            .name(weight_prop);
+        let props_results = datastore.get(q)?;
 
-            let current_weight = props_results
-                .first()
-                .and_then(|res| match res {
-                    QueryOutputValue::EdgeProperties(props) => props.first(),
-                    _ => None,
+        let current_weight = props_results
+            .first()
+            .and_then(|res| match res {
+                QueryOutputValue::EdgeProperties(props) => props.first(),
+                _ => None,
+            })
+            .and_then(|prop| prop.props.first())
+            .and_then(|p| {
+                p.value.as_u64().or_else(|| {
+                    serde_json::from_value::<String>(p.value.deref().clone())
+                        .ok()
+                        .and_then(|s| s.parse::<u64>().ok())
                 })
-                .and_then(|prop| prop.props.first())
-                .and_then(|p| {
-                    p.value.as_u64().or_else(|| {
-                        serde_json::from_value::<String>(p.value.deref().clone())
-                            .ok()
-                            .and_then(|s| s.parse::<u64>().ok())
-                    })
-                })
-                .unwrap_or(1);
+            })
+            .unwrap_or(1);
 
-            let new_weight = current_weight + 1;
-            let q = SpecificEdgeQuery::single(edge.clone());
-            datastore.set_properties(q, weight_prop, &Json::new(json!(new_weight)))?;
+        let new_weight = current_weight + 1;
+        let q = SpecificEdgeQuery::single(edge.clone());
+        datastore.set_properties(q, weight_prop, &Json::new(json!(new_weight)))?;
 
-            return Ok(());
-        }
+        return Ok(());
     }
 
     // Create new edge
