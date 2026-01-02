@@ -1,11 +1,32 @@
-//! DBLP (Database systems and Logic Programming) Search API Scraper
+//! DBLP Search API Scraper
 //!
 //! This module implements a scraper for the DBLP computer science bibliography database using its Search API.
 //!
 //! # Data Source
-//! - API: https://dblp.org/search/publ/api
+//! - API: <https://dblp.org/search/publ/api>
 //! - Format: JSON
 //! - Method: Paged search queries by year
+//!
+//! # Implementation Details
+//! The scraper works by iterating through each year in the requested date range and querying `year:YYYY`.
+//! It handles pagination automatically and respects a configurable delay between requests to be polite to the API.
+//!
+//! # Example
+//! ```rust,no_run
+//! use erdos_graph::scrapers::dblp::DblpScraper;
+//! use erdos_graph::scrapers::scraper::Scraper;
+//! use chrono::{Utc, TimeZone};
+//!
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let scraper = DblpScraper::new();
+//! let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+//! let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+//!
+//! let records = scraper.scrape_range(start, end).await?;
+//! println!("Found {} records", records.len());
+//! # Ok(())
+//! # }
+//! ```
 
 use crate::db::ingestion::PublicationRecord;
 use crate::scrapers::scraper::Scraper;
@@ -13,7 +34,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::Value; // Add this
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
@@ -21,6 +42,9 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 /// DBLP scraper that implements the Scraper trait.
+///
+/// This struct wraps the configuration and provides the implementation for the
+/// `Scraper` trait methods.
 #[derive(Clone, Debug)]
 pub struct DblpScraper {
     config: DblpConfig,
@@ -35,6 +59,10 @@ impl DblpScraper {
     }
 
     /// Create a new DblpScraper with custom configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - A `DblpConfig` instance containing the desired settings.
     pub fn with_config(config: DblpConfig) -> Self {
         Self { config }
     }
@@ -48,6 +76,9 @@ impl Default for DblpScraper {
 
 #[async_trait]
 impl Scraper for DblpScraper {
+    /// Scrapes DBLP for publications within the given date range.
+    ///
+    /// This method delegates to `scrape_range_with_config` using the scraper's configuration.
     async fn scrape_range(
         &self,
         start: DateTime<Utc>,
@@ -57,7 +88,21 @@ impl Scraper for DblpScraper {
     }
 }
 
-/// Configuration for DBLP scraper
+/// Configuration for the DBLP scraper.
+///
+/// This struct holds configuration parameters that control how the scraper interacts
+/// with the DBLP API, including the base URL, pagination size, and rate limiting.
+///
+/// # Fields
+///
+/// * `base_url`: The base URL for the DBLP Search API. Defaults to `https://dblp.org/search/publ/api`.
+/// * `page_size`: The number of results to request per page. DBLP typically allows up to 1000.
+/// * `delay_ms`: The delay in milliseconds between requests to avoid hitting rate limits.
+///
+/// # Environment Variables
+///
+/// The `Default` implementation looks for the following environment variables:
+/// * `DBLP_BASE_URL`: Overrides the default base URL.
 #[derive(Clone, Debug)]
 pub struct DblpConfig {
     /// Base URL for the DBLP Search API
@@ -82,47 +127,69 @@ impl Default for DblpConfig {
 
 // --- DBLP API Response Structures ---
 
+/// Top-level response structure from the DBLP Search API.
 #[derive(Debug, Deserialize)]
 struct DblpResponse {
     result: DblpResult,
 }
 
+/// Container for the search results.
 #[derive(Debug, Deserialize)]
 struct DblpResult {
     hits: DblpHits,
 }
 
+/// Contains the list of hits and metadata about the search result count.
 #[derive(Debug, Deserialize)]
 struct DblpHits {
+    /// The list of publication hits.
     #[serde(default)]
     hit: Vec<DblpHit>,
+    /// The number of results sent in this response.
+    /// Note: Type is `Value` because DBLP can return this as a string or number.
     #[serde(default)]
-    _sent: Value, // Changed from String to Value, prefixed with _ to suppress warning
+    _sent: Value,
+    /// The total number of matches for the query.
+    /// Note: Type is `Value` because DBLP can return this as a string or number.
     #[serde(default)]
-    total: Value, // Changed from String to Value
+    total: Value,
 }
 
+/// Represents a single search hit (publication).
 #[derive(Debug, Deserialize)]
 struct DblpHit {
+    /// The actual publication info.
     info: Option<DblpInfo>,
 }
 
+/// detailed information about a publication.
 #[derive(Debug, Deserialize)]
 struct DblpInfo {
+    /// Title of the publication.
     title: Option<String>,
+    /// Authors of the publication.
     authors: Option<DblpAuthors>,
+    /// Year of publication (as a string).
     year: Option<String>,
+    /// Venue or journal name.
     venue: Option<String>,
+    /// DBLP key for the publication.
     key: Option<String>,
     // other fields like type, doi, url exist but we focus on these
 }
 
+/// Container for the list of authors.
 #[derive(Debug, Deserialize)]
 struct DblpAuthors {
+    /// List of authors, which can be simple strings or objects.
     #[serde(default)]
     author: Vec<StringOrStruct>,
 }
 
+/// Enum to handle DBLP's inconsistent author formatting.
+///
+/// Sometimes an author is just a string name, other times it's an object with a `text` field
+/// (and potentially other fields like `pid`).
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum StringOrStruct {
@@ -130,11 +197,21 @@ enum StringOrStruct {
     Struct { text: String },
 }
 
-// --- Implementation ---
-
 /// Scrapes DBLP publication data for a specified date range using the Search API.
 ///
-/// It iterates through each year in the range [start_date, end_date] and queries `year:YYYY`.
+/// This function iterates through each year in the provided range `[start_date, end_date]`
+/// and performs a search query for `year:YYYY`. It handles pagination to retrieve all
+/// results for each year.
+///
+/// # Arguments
+///
+/// * `start_date` - The start of the date range (inclusive).
+/// * `end_date` - The end of the date range (inclusive).
+///
+/// # Returns
+///
+/// Returns a `Result` containing a vector of `PublicationRecord` on success, or a
+/// `Box<dyn std::error::Error>` if an error occurs during scraping or parsing.
 pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
@@ -142,6 +219,26 @@ pub async fn scrape_range(
     scrape_range_with_config(start_date, end_date, DblpConfig::default()).await
 }
 
+/// Scrapes DBLP publication data with a custom configuration.
+///
+/// This function contains the core logic for scraping. It:
+/// 1. Iterates through each year in the date range.
+/// 2. Constructs the DBLP API URL for the query `year:YYYY`.
+/// 3. Fetches pages of results using the configured `page_size`.
+/// 4. Caches responses to the `.dblp_cache` directory to avoid re-fetching.
+/// 5. Parses the JSON response and converts hits to `PublicationRecord` objects.
+/// 6. Respects the `delay_ms` configuration to rate limit requests.
+///
+/// # Arguments
+///
+/// * `start_date` - The start of the date range (inclusive).
+/// * `end_date` - The end of the date range (inclusive).
+/// * `config` - The `DblpConfig` to use for the scraper.
+///
+/// # Returns
+///
+/// Returns a `Result` containing a vector of `PublicationRecord` on success, or a
+/// `Box<dyn std::error::Error>` if an error occurs.
 pub async fn scrape_range_with_config(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
@@ -156,13 +253,7 @@ pub async fn scrape_range_with_config(
     let client = Client::new();
     let mut all_records = Vec::new();
 
-    println!(
-        "Starting DBLP API scrape for years {} to {}...",
-        start_year, end_year
-    );
-
     for year in start_year..=end_year {
-        println!("Fetching DBLP records for year {}...", year);
         let mut first = 0;
         let query = format!("year:{}", year);
 
@@ -217,14 +308,17 @@ pub async fn scrape_range_with_config(
         }
     }
 
-    println!(
-        "DBLP scraping complete. Found {} records.",
-        all_records.len()
-    );
     Ok(all_records)
 }
 
-/// Helper function to fetch URL with file-based caching
+/// Helper function to fetch URL with file-based caching.
+///
+/// This function:
+/// 1. Computes a SHA256 hash of the URL to use as the cache filename.
+/// 2. Checks if the file exists in `.dblp_cache`.
+/// 3. If it exists, returns the content from the file.
+/// 4. If not, fetches the URL using `reqwest`.
+/// 5. If the fetch is successful, writes the content to the cache file and returns it.
 async fn fetch_url_cached(
     client: &Client,
     url: &str,
@@ -258,6 +352,9 @@ async fn fetch_url_cached(
     Ok(text)
 }
 
+/// Converts a DBLP hit info into a `PublicationRecord`.
+///
+/// Returns `None` if required fields (title, authors) are missing or empty.
 fn convert_hit_to_record(info: DblpInfo) -> Option<PublicationRecord> {
     let title = info.title?;
     let year_str = info.year?;
