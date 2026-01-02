@@ -111,6 +111,8 @@ pub struct DblpConfig {
     pub page_size: usize,
     /// Delay between requests in milliseconds
     pub delay_ms: u64,
+    /// Enable file-based caching (disable for tests)
+    pub enable_cache: bool,
 }
 
 impl Default for DblpConfig {
@@ -121,6 +123,7 @@ impl Default for DblpConfig {
             base_url,
             page_size: 1000,
             delay_ms: 1000, // Be polite
+            enable_cache: true,
         }
     }
 }
@@ -264,7 +267,7 @@ pub async fn scrape_range_with_config(
             );
 
             // Use cached fetch if available
-            let body_text = match fetch_url_cached(&client, &url).await {
+            let body_text = match fetch_url_cached(&client, &url, config.enable_cache).await {
                 Ok(text) => text,
                 Err(e) => {
                     eprintln!("Failed to fetch URL {}: {}", url, e);
@@ -322,7 +325,16 @@ pub async fn scrape_range_with_config(
 async fn fetch_url_cached(
     client: &Client,
     url: &str,
+    enable_cache: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    if !enable_cache {
+        let resp = client.get(url).send().await?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP error: {}", resp.status()).into());
+        }
+        return Ok(resp.text().await?);
+    }
+
     let cache_dir = Path::new(".dblp_cache");
     if !cache_dir.exists() {
         fs::create_dir_all(cache_dir)?;

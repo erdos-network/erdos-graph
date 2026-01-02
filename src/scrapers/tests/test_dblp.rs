@@ -30,6 +30,7 @@ mod tests {
             base_url: mock_url.to_string(),
             page_size: 100,
             delay_ms: 0, // No delay for tests
+            enable_cache: false,
         };
         dblp::scrape_range_with_config(start, end, config).await
     }
