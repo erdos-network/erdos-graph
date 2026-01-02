@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
+    use crate::config::DblpSourceConfig;
     use crate::db::ingestion::PublicationRecord;
-    use crate::scrapers::dblp::{self, DblpConfig};
+    use crate::scrapers::dblp;
     use chrono::{TimeZone, Utc};
     use mockito::Server;
     use serde_json::json;
@@ -26,7 +27,7 @@ mod tests {
         end: chrono::DateTime<Utc>,
         mock_url: &str,
     ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-        let config = DblpConfig {
+        let config = DblpSourceConfig {
             base_url: mock_url.to_string(),
             page_size: 100,
             delay_ms: 0, // No delay for tests

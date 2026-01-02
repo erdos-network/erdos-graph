@@ -23,11 +23,14 @@ async fn test_scraping_flow_arxiv() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config {
         scrapers: ScraperConfig {
             enabled: vec!["arxiv".to_string()],
+            dblp: Default::default(),
+            arxiv: Default::default(),
         },
         ingestion: IngestionConfig {
             chunk_size_days: 1,
             initial_start_date: "2020-01-01T00:00:00Z".to_string(),
             weekly_days: 7,
+            checkpoint_dir: None,
         },
         deduplication: DeduplicationConfig {
             title_similarity_threshold: 0.9,
@@ -55,11 +58,14 @@ async fn test_scraping_flow_dblp() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config {
         scrapers: ScraperConfig {
             enabled: vec!["dblp".to_string()],
+            dblp: Default::default(),
+            arxiv: Default::default(),
         },
         ingestion: IngestionConfig {
             chunk_size_days: 1,
             initial_start_date: "2020-01-01T00:00:00Z".to_string(),
             weekly_days: 7,
+            checkpoint_dir: None,
         },
         deduplication: DeduplicationConfig {
             title_similarity_threshold: 0.9,

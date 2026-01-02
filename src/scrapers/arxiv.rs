@@ -9,22 +9,24 @@ use quick_xml::events::Event;
 use reqwest::Client;
 use tokio::time::{Duration, sleep};
 
+use crate::config::ArxivSourceConfig;
+
 /// ArXiv scraper that implements the Scraper trait.
 #[derive(Clone, Debug)]
 pub struct ArxivScraper {
-    config: ArxivConfig,
+    config: ArxivSourceConfig,
 }
 
 impl ArxivScraper {
     /// Create a new ArxivScraper with default configuration.
     pub fn new() -> Self {
         Self {
-            config: ArxivConfig::default(),
+            config: ArxivSourceConfig::default(),
         }
     }
 
     /// Create a new ArxivScraper with custom configuration.
-    pub fn with_config(config: ArxivConfig) -> Self {
+    pub fn with_config(config: ArxivSourceConfig) -> Self {
         Self { config }
     }
 }
@@ -43,118 +45,6 @@ impl Scraper for ArxivScraper {
         end: DateTime<Utc>,
     ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
         scrape_range_with_config_async(start, end, self.config.clone()).await
-    }
-}
-
-#[derive(Clone, Debug)]
-/// Configuration for the ArXiv scraper.
-///
-/// A small configuration bag used by the ArXiv scraping helpers.
-///
-/// Important semantics
-///
-/// - Paging is controlled by `page_size` (how many results requested per page).
-///   The scraper treats a page that returns fewer than `page_size` items as an
-///   indication of the end of results.
-///
-/// - Concurrency is governed by `channel_size` (an advisory number of
-///   concurrent workers / channel buffer size used when parallelizing page
-///   fetch/processing). The current implementation stores this value and uses
-///   it for sizing; callers may use it to control parallelism.
-///
-/// - `delay_ms` is a polite delay inserted between each paged request and is
-///   expressed in milliseconds (ms). Use `Duration::from_millis(cfg.delay_ms)`
-///   when converting to a `Duration`.
-///
-/// - `Default::default()` reads environment variables at process startup to
-///   provide reproducible, deploy-friendly defaults. Environment variable
-///   names are documented below.
-///
-/// Fields (with default values and units)
-///
-/// - `base_url: String` — Default: `"http://export.arxiv.org/api/query"`.
-///   The HTTP endpoint used to query the ArXiv Atom API.
-///
-/// - `page_size: usize` — Default: `100`.
-///   Number of results requested per page (affects network request size and the
-///   scraper's detection of the end of results).
-///
-/// - `channel_size: usize` — Default: `8`.
-///   Advisory concurrency / channel buffer size (unit: number of workers).
-///
-/// - `delay_ms: u64` — Default: `200` (milliseconds).
-///   Milliseconds to sleep between paged requests to avoid hammering the API.
-///
-/// Environment variables read by `Default` (when present)
-///
-/// - `ARXIV_API_BASE` — overrides `base_url`.
-/// - `ARXIV_PAGE_SIZE` — overrides `page_size`.
-/// - `ARXIV_CHANNEL_SIZE` — overrides `channel_size`.
-/// - `ARXIV_DELAY_MS` — overrides `delay_ms` (value parsed as integer ms).
-///
-/// Example
-///
-/// ```rust
-/// # use chrono::Utc;
-/// # use erdos_graph::scrapers::arxiv::ArxivConfig;
-/// // build a deterministic config for tests or for a mock server
-/// let mut cfg = ArxivConfig::default();
-/// cfg.page_size = 50; // smaller page for faster test cycles
-/// cfg.delay_ms = 0; // disable politeness delay in unit tests when hitting a mock
-/// // pass `cfg` into `scrape_range_with_config_async` for deterministic behavior
-/// ```
-///
-/// Notes and runtime/testing caveats
-///
-/// - Prefer calling `scrape_range_with_config_async(start, end, cfg)` in
-///   tests and pointing `cfg.base_url` to a mock HTTP server. This keeps
-///   tests deterministic and avoids relying on live network access.
-///
-/// - Because `Default` reads environment variables, tests that rely on
-///   `ArxivConfig::default()` may be influenced by the test environment; if
-///   reproducibility is required, construct an explicit `ArxivConfig`.
-///
-/// - The scraper implements a streaming, sliding-window parser that keeps
-///   memory usage proportional to the largest in-flight page/entry rather
-///   than the whole feed. Very large individual entries still require memory
-///   proportional to their size.
-///
-/// - `channel_size` is currently advisory; if you plan to add parallel page
-///   fetch/processing, use this field to size the worker pool and channel
-///   buffers.
-pub struct ArxivConfig {
-    pub base_url: String,
-    pub page_size: usize,
-    pub channel_size: usize,
-    /// Delay between pages in milliseconds
-    pub delay_ms: u64,
-}
-
-/// Default construction for `ArxivConfig`.
-///
-/// This implementation reads optional environment variables to override the
-/// compile-time defaults. The variables are:
-/// - `ARXIV_API_BASE` — base API URL (default: `http://export.arxiv.org/api/query`)
-/// - `ARXIV_PAGE_SIZE` — page size (default: `100`)
-/// - `ARXIV_CHANNEL_SIZE` — advisory channel/worker size (default: `8`)
-/// - `ARXIV_DELAY_MS` — polite delay between pages in milliseconds (default: `200`)
-impl Default for ArxivConfig {
-    fn default() -> Self {
-        fn env_usize(name: &str, default: usize) -> usize {
-            std::env::var(name)
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(default)
-        }
-
-        let base = std::env::var("ARXIV_API_BASE")
-            .unwrap_or_else(|_| "http://export.arxiv.org/api/query".to_string());
-        ArxivConfig {
-            base_url: base,
-            page_size: env_usize("ARXIV_PAGE_SIZE", 100),
-            channel_size: env_usize("ARXIV_CHANNEL_SIZE", 8),
-            delay_ms: env_usize("ARXIV_DELAY_MS", 200) as u64,
-        }
     }
 }
 
@@ -439,16 +329,18 @@ pub(crate) fn parse_entries_from_chunks(
 /// - `Ok(Vec<PublicationRecord>)` on success with the matched records.
 /// - `Err(...)` on network, parsing, or runtime errors.
 ///
+/// - `Err(...)` on network, parsing, or runtime errors.
+///
 /// Notes
 /// - For tests or deterministic runs prefer `scrape_range_with_config_async`
-///   and pass a custom `ArxivConfig` (e.g., with `base_url` pointing at a
+///   and pass a custom `ArxivSourceConfig` (e.g., with `base_url` pointing at a
 ///   mock server).
 #[coverage(off)]
 pub async fn scrape_range_async(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    let cfg = ArxivConfig::default();
+    let cfg = ArxivSourceConfig::default();
     scrape_range_with_config_async(start_date, end_date, cfg).await
 }
 
@@ -461,7 +353,7 @@ pub async fn scrape_range_async(
 /// Parameters
 /// - `start_date`, `end_date`: include publications with `published` in
 ///   [start_date, end_date).
-/// - `cfg`: an `ArxivConfig` controlling endpoint, paging, and polite delays.
+/// - `cfg`: an `ArxivSourceConfig` controlling endpoint, paging, and polite delays.
 ///
 /// Returns
 /// - `Ok(Vec<PublicationRecord>)` on success.
@@ -469,7 +361,7 @@ pub async fn scrape_range_async(
 pub async fn scrape_range_with_config_async(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    cfg: ArxivConfig,
+    cfg: ArxivSourceConfig,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
     let client = Client::new();
     let mut start: usize = 0;
@@ -480,9 +372,13 @@ pub async fn scrape_range_with_config_async(
     let mut results: Vec<PublicationRecord> = Vec::new();
 
     loop {
+        // Format dates as YYYYMMDDHHMM
+        let start_str = start_date.format("%Y%m%d%H%M").to_string();
+        let end_str = end_date.format("%Y%m%d%H%M").to_string();
+
         let url = format!(
-            "{}?search_query=all&start={}&max_results={}",
-            cfg.base_url, start, page_size
+            "{}?search_query=lastUpdatedDate:[{}+TO+{}]&start={}&max_results={}",
+            cfg.base_url, start_str, end_str, start, page_size
         );
 
         // Sliding-window streaming parser: accumulate chunks and extract <entry> slices

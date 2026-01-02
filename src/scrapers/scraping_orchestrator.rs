@@ -59,12 +59,13 @@ pub async fn run_scrape(
         let src_name = src.clone();
         let start = start_date;
         let end = end_date;
+        let scraper_config = config.scrapers.clone();
 
         let task = tokio::spawn(async move {
             let scraper: Box<dyn Scraper> = match src_name.as_str() {
-                "arxiv" => Box::new(ArxivScraper::new()),
-                "dblp" => Box::new(DblpScraper::new()),
-                "zbmath" => Box::new(ZbmathScraper::new()),
+                "arxiv" => Box::new(ArxivScraper::with_config(scraper_config.arxiv)),
+                "dblp" => Box::new(DblpScraper::with_config(scraper_config.dblp)),
+                "zbmath" => Box::new(ZbmathScraper::new()), // Zbmath not updated yet
                 _ => {
                     eprintln!("Unknown source: {}", src_name);
                     return;
@@ -129,24 +130,25 @@ async fn ingest_publication(
     // Add publication vertex to database
     let pub_vertex = add_publication(&record, datastore)?;
 
+    let mut author_vertices = Vec::new();
+
     // Add new author vertices and create AUTHORED edges
     for author in &record.authors {
         let author_vertex = get_or_create_author_vertex(author, datastore)?;
         create_authored_edge(&author_vertex, &pub_vertex, datastore)?;
+        author_vertices.push(author_vertex);
     }
 
     // Create COAUTHORED_WITH edges between authors
-    for i in 0..record.authors.len() {
-        for j in (i + 1)..record.authors.len() {
-            // Retrieve author vertices again since we need their IDs
-            // Optimally we'd cache these but for now we look them up
-            let author1 = get_or_create_author_vertex(&record.authors[i], datastore)?;
-            let author2 = get_or_create_author_vertex(&record.authors[j], datastore)?;
+    for i in 0..author_vertices.len() {
+        for j in (i + 1)..author_vertices.len() {
+            let author1 = &author_vertices[i];
+            let author2 = &author_vertices[j];
 
             // Create COAUTHORED_WITH edge between record.authors[i] and record.authors[j]
-            create_coauthor_edge(&author1, &author2, datastore)?;
+            create_coauthor_edge(author1, author2, datastore)?;
             // Also create reverse edge for undirected graph simulation
-            create_coauthor_edge(&author2, &author1, datastore)?;
+            create_coauthor_edge(author2, author1, datastore)?;
         }
     }
 

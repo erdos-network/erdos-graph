@@ -1,0 +1,68 @@
+//! Benchmark scraping job
+//!
+//! This module provides a job to benchmark the scraping process for a specified number of weeks.
+
+use crate::config::Config;
+use crate::db::ingestion::orchestrate_scraping_and_ingestion;
+use indradb::{Database, Datastore};
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::Mutex;
+
+use tempfile::TempDir;
+
+/// Runs a benchmark scrape for a specified duration (in weeks).
+///
+/// This job modifies the configuration to scrape back `num_weeks` and times the execution.
+/// It acquires the datastore lock to ensure exclusive access.
+/// It uses a temporary checkpoint directory to ignore existing checkpoints and force
+/// scraping of the requested duration.
+///
+/// # Arguments
+/// * `num_weeks` - Number of weeks to scrape back
+/// * `config` - Base application configuration
+/// * `datastore` - Arc-wrapped Mutex of the IndraDB datastore
+///
+/// # Returns
+/// `Ok(Duration)` containing the elapsed time, or an error if execution fails
+pub async fn run_benchmark<D: Datastore + Send + 'static>(
+    num_weeks: u64,
+    mut config: Config,
+    datastore: Arc<Mutex<Database<D>>>,
+) -> Result<std::time::Duration, Box<dyn std::error::Error>> {
+    let sources = config.scrapers.enabled.clone();
+    println!(
+        "Starting benchmark scrape for {} weeks on sources: {:?}",
+        num_weeks, sources
+    );
+
+    // Create temporary directory for checkpoints to isolate benchmark
+    // This ensures we scrape the full requested duration regardless of existing checkpoints
+    let temp_checkpoint_dir = TempDir::new()?;
+    config.ingestion.checkpoint_dir =
+        Some(temp_checkpoint_dir.path().to_string_lossy().to_string());
+
+    // Override weekly_days in config for the benchmark
+    config.ingestion.weekly_days = num_weeks * 7;
+
+    // Acquire lock to ensure exclusive access
+    // This acts as the queue: if another job is running, we wait here.
+    let mut db = datastore.lock().await;
+
+    let start_time = Instant::now();
+
+    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut *db, &config).await {
+        Ok(_) => {
+            let duration = start_time.elapsed();
+            println!(
+                "Benchmark completed successfully. Elapsed time: {:.2} seconds",
+                duration.as_secs_f64()
+            );
+            Ok(duration)
+        }
+        Err(e) => {
+            eprintln!("Benchmark failed: {}", e);
+            Err(e)
+        }
+    }
+}
