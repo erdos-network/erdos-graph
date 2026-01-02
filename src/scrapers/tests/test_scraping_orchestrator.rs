@@ -3,8 +3,8 @@ mod tests {
     use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::scraping_orchestrator::{
-        add_publication, create_authored_edge, create_coauthor_edge, get_or_create_author_vertex,
-        publication_exists,
+        DeduplicationCache, add_publication, create_authored_edge, create_coauthor_edge,
+        get_or_create_author_vertex, publication_exists,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use indradb::{
@@ -447,7 +447,9 @@ mod tests {
 
         // 1. Create new author
         let author_name = "Paul Erdős";
-        let vertex1 = get_or_create_author_vertex(author_name, &mut database).unwrap();
+        let mut author_cache = HashMap::new();
+        let vertex1 =
+            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
 
         // Verify vertex type
         assert_eq!(vertex1.t.as_str(), "Person");
@@ -487,14 +489,16 @@ mod tests {
         assert_eq!(get_prop("erdos_number"), "None");
 
         // 2. Get existing author
-        let vertex2 = get_or_create_author_vertex(author_name, &mut database).unwrap();
+        let vertex2 =
+            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
 
         // Should be the same vertex ID
         assert_eq!(vertex1.id, vertex2.id);
 
         // 3. Create a different author
         let other_name = "Alice Smith";
-        let vertex3 = get_or_create_author_vertex(other_name, &mut database).unwrap();
+        let vertex3 =
+            get_or_create_author_vertex(other_name, &mut database, &mut author_cache).unwrap();
 
         assert_ne!(vertex1.id, vertex3.id);
 
@@ -521,7 +525,9 @@ mod tests {
 
         // Create author and publication
         let author_name = "Paul Erdős";
-        let author = get_or_create_author_vertex(author_name, &mut database).unwrap();
+        let mut author_cache = HashMap::new();
+        let author =
+            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
 
         let record = PublicationRecord {
             id: "arxiv:1234.5678".to_string(),
@@ -564,11 +570,15 @@ mod tests {
             .index_property(Identifier::new("name").unwrap())
             .unwrap();
 
-        let author1 = get_or_create_author_vertex("Alice", &mut database).unwrap();
-        let author2 = get_or_create_author_vertex("Bob", &mut database).unwrap();
+        let mut author_cache = HashMap::new();
+        let author1 =
+            get_or_create_author_vertex("Alice", &mut database, &mut author_cache).unwrap();
+        let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
+
+        let mut edge_cache = HashMap::new();
 
         // 1. Create initial edge
-        create_coauthor_edge(&author1, &author2, &mut database).unwrap();
+        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
 
         // Verify edge and weight
         let edge_type = Identifier::new("COAUTHORED_WITH").unwrap();
@@ -595,7 +605,7 @@ mod tests {
         assert_eq!(weight, 1);
 
         // 2. Increment weight (simulate second collaboration)
-        create_coauthor_edge(&author1, &author2, &mut database).unwrap();
+        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
 
         let q = SpecificEdgeQuery::single(expected_edge.clone())
             .properties()
@@ -654,6 +664,9 @@ mod tests {
             .index_property(Identifier::new("name").unwrap())
             .unwrap(); // For author lookup
 
+        let mut dedup_cache = DeduplicationCache::new();
+        let mut author_cache = HashMap::new();
+
         // Test Exact ID Match
         let record1 = PublicationRecord {
             id: "arxiv:1234".to_string(),
@@ -666,7 +679,12 @@ mod tests {
         add_publication(&record1, &mut database).unwrap();
 
         // Should exist
-        assert!(publication_exists(&record1, &database, &config));
+        assert!(publication_exists(
+            &record1,
+            &database,
+            &config,
+            &mut dedup_cache
+        ));
 
         // Test Fuzzy Match
         let record2 = PublicationRecord {
@@ -679,7 +697,8 @@ mod tests {
         };
 
         // Ensure the author is linked to the first publication for author check to pass
-        let author_v = get_or_create_author_vertex("Author A", &mut database).unwrap();
+        let author_v =
+            get_or_create_author_vertex("Author A", &mut database, &mut author_cache).unwrap();
 
         // Find record1 vertex
         let pub1_q = RangeVertexQuery::new().t(Identifier::new("Publication").unwrap());
@@ -691,7 +710,12 @@ mod tests {
         create_authored_edge(&author_v, &pub1, &mut database).unwrap();
 
         // Check if fuzzy match detects existing publication
-        assert!(publication_exists(&record2, &database, &config));
+        assert!(publication_exists(
+            &record2,
+            &database,
+            &config,
+            &mut dedup_cache
+        ));
 
         // Test non-existent differing by title
         let record3 = PublicationRecord {
@@ -702,7 +726,12 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-        assert!(!publication_exists(&record3, &database, &config));
+        assert!(!publication_exists(
+            &record3,
+            &database,
+            &config,
+            &mut dedup_cache
+        ));
 
         // Test non-existent differing by year
         let record4 = PublicationRecord {
@@ -713,6 +742,11 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-        assert!(!publication_exists(&record4, &database, &config));
+        assert!(!publication_exists(
+            &record4,
+            &database,
+            &config,
+            &mut dedup_cache
+        ));
     }
 }

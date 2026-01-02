@@ -254,4 +254,62 @@ mod tests {
         assert_eq!(records[0].authors[0], "Name1");
         assert_eq!(records[1].authors[0], "Name2");
     }
+
+    #[tokio::test]
+    async fn test_dblp_optimization_skips_historic_year_without_jan1() {
+        let server = Server::new_async().await;
+
+        // Config: use mock server
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            enable_cache: false,
+        };
+
+        // Date setup
+        // Current date in env is Jan 2026.
+        // Historic year: 2020.
+        // Range: Feb 1 2020 to Mar 1 2020. Does NOT include Jan 1.
+        let start = Utc.with_ymd_and_hms(2020, 2, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2020, 3, 1, 0, 0, 0).unwrap();
+
+        // If the optimization works, NO request should be made to the server.
+        let result = dblp::scrape_range_with_config(start, end, config).await;
+
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_optimization_includes_historic_year_with_jan1() {
+        let mut server = Server::new_async().await;
+
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            enable_cache: false,
+        };
+
+        // Historic year: 2020.
+        // Range: Dec 31 2019 to Jan 2 2020. Includes Jan 1 2020.
+        let start = Utc.with_ymd_and_hms(2019, 12, 31, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap();
+
+        // Expect request for 2020
+        let _m2020 = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2020.*".into()))
+            .with_status(200)
+            .with_body(r#"{"result":{"hits":{"hit":[],"sent":0,"total":0}}}"#)
+            .create_async()
+            .await;
+
+        let result = dblp::scrape_range_with_config(start, end, config).await;
+
+        assert!(result.is_ok());
+        _m2020.assert();
+    }
 }

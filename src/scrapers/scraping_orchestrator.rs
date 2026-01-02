@@ -14,10 +14,144 @@ use indradb::{
     SpecificEdgeQuery, SpecificVertexQuery, Vertex,
 };
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use textdistance::Algorithm;
 use textdistance::Cosine;
+use uuid::Uuid;
+
+use std::time::Instant;
+
+/// Cached publication information for deduplication.
+#[derive(Clone, Debug)]
+struct DeduplicationCandidate {
+    id: Uuid,
+    title: String,
+    // We do not cache authors to save memory; if title matches, we check DB.
+}
+
+/// Helper struct to manage deduplication caching.
+pub(crate) struct DeduplicationCache {
+    /// Map of year -> list of candidates
+    candidates_by_year: HashMap<u32, Vec<DeduplicationCandidate>>,
+}
+
+impl DeduplicationCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            candidates_by_year: HashMap::new(),
+        }
+    }
+
+    /// Adds a record to the cache.
+    fn add(&mut self, year: u32, id: Uuid, title: String) {
+        self.candidates_by_year
+            .entry(year)
+            .or_default()
+            .push(DeduplicationCandidate { id, title });
+    }
+
+    /// Checks if a record exists in the cache (and populates cache from DB if needed).
+    fn check_exists_and_cache(
+        &mut self,
+        record: &PublicationRecord,
+        datastore: &Database<impl Datastore>,
+        config: &Config,
+    ) -> bool {
+        // Ensure cache is populated for this year
+        if !self.candidates_by_year.contains_key(&record.year) {
+            self.populate_year(record.year, datastore);
+        }
+
+        let candidates = self.candidates_by_year.get(&record.year).unwrap();
+
+        let cosine = Cosine::default();
+        let record_title_norm = record.title.to_lowercase();
+
+        for candidate in candidates {
+            let db_title_norm = candidate.title.to_lowercase();
+            let similarity = cosine.for_str(&record_title_norm, &db_title_norm).nval();
+
+            if similarity >= config.deduplication.title_similarity_threshold {
+                // Title matches, check authors via DB
+                if check_authors_similarity(
+                    &candidate.id,
+                    &record.authors,
+                    datastore,
+                    config.deduplication.author_similarity_threshold,
+                ) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn populate_year(&mut self, year: u32, datastore: &Database<impl Datastore>) {
+        let start = Instant::now();
+        // Fetch all papers for the year
+        if let Ok(type_prop) = Identifier::new(crate::db::schema::PUBLICATION_TYPE)
+            && let Ok(year_prop) = Identifier::new("year")
+            && let Ok(title_prop) = Identifier::new("title")
+        {
+            let year_val = Json::new(json!(year.to_string()));
+
+            // We need vertex ID and title property
+            let q = RangeVertexQuery::new()
+                .t(type_prop)
+                .with_property_equal_to(year_prop, year_val);
+
+            if let Ok(q) = q {
+                // Get properties
+                if let Ok(q_props) = q.properties() {
+                    if let Ok(results) = datastore.get(q_props) {
+                        if let Some(QueryOutputValue::VertexProperties(vps)) = results.first() {
+                            let mut list = Vec::new();
+                            for vp in vps {
+                                if let Some(val) = vp.props.iter().find(|p| p.name == title_prop)
+                                    && let Some(title) = val.value.as_str()
+                                {
+                                    list.push(DeduplicationCandidate {
+                                        id: vp.vertex.id,
+                                        title: title.to_string(),
+                                    });
+                                }
+                            }
+                            logger::info(&format!(
+                                "Populated cache for year {}: {} candidates in {}ms",
+                                year,
+                                list.len(),
+                                start.elapsed().as_millis()
+                            ));
+                            self.candidates_by_year.insert(year, list);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        // If failed or empty, insert empty list
+        self.candidates_by_year.insert(year, Vec::new());
+    }
+}
+
+/// Context for ingestion to maintain caches
+pub(crate) struct IngestionContext {
+    pub dedup_cache: DeduplicationCache,
+    pub author_cache: HashMap<String, Vertex>,
+    pub edge_cache: HashMap<(Uuid, Uuid), u64>,
+}
+
+impl IngestionContext {
+    fn new() -> Self {
+        Self {
+            dedup_cache: DeduplicationCache::new(),
+            author_cache: HashMap::new(),
+            edge_cache: HashMap::new(),
+        }
+    }
+}
 
 /// Orchestrates the complete scraping process for one or more publication sources.
 ///
@@ -108,10 +242,12 @@ pub async fn run_scrape(
 
     // Consumer loop
     let mut ingested_count = 0;
+    let mut context = IngestionContext::new();
+
     loop {
         if let Some(record) = queue.dequeue() {
             // Ingest publication into db
-            if let Err(e) = ingest_publication(record, datastore, config).await {
+            if let Err(e) = ingest_publication(record, datastore, config, &mut context).await {
                 logger::error(&format!("Failed to ingest publication: {}", e));
             }
             ingested_count += 1;
@@ -145,20 +281,27 @@ async fn ingest_publication(
     record: PublicationRecord,
     datastore: &mut Database<impl Datastore>,
     config: &Config,
+    context: &mut IngestionContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if record already exists in the database
-    if publication_exists(&record, datastore, config) {
+    if publication_exists(&record, datastore, config, &mut context.dedup_cache) {
         return Ok(());
     }
 
     // Add publication vertex to database
     let pub_vertex = add_publication(&record, datastore)?;
 
+    // Add to cache
+    context
+        .dedup_cache
+        .add(record.year, pub_vertex.id, record.title.clone());
+
     let mut author_vertices = Vec::new();
 
     // Add new author vertices and create AUTHORED edges
     for author in &record.authors {
-        let author_vertex = get_or_create_author_vertex(author, datastore)?;
+        let author_vertex =
+            get_or_create_author_vertex(author, datastore, &mut context.author_cache)?;
         create_authored_edge(&author_vertex, &pub_vertex, datastore)?;
         author_vertices.push(author_vertex);
     }
@@ -170,9 +313,9 @@ async fn ingest_publication(
             let author2 = &author_vertices[j];
 
             // Create COAUTHORED_WITH edge between record.authors[i] and record.authors[j]
-            create_coauthor_edge(author1, author2, datastore)?;
+            create_coauthor_edge(author1, author2, datastore, &mut context.edge_cache)?;
             // Also create reverse edge for undirected graph simulation
-            create_coauthor_edge(author2, author1, datastore)?;
+            create_coauthor_edge(author2, author1, datastore, &mut context.edge_cache)?;
         }
     }
 
@@ -196,6 +339,7 @@ pub(crate) fn publication_exists(
     record: &PublicationRecord,
     datastore: &Database<impl Datastore>,
     config: &Config,
+    dedup_cache: &mut DeduplicationCache,
 ) -> bool {
     // Check exact match on publication_id
     if let Ok(id_prop) = Identifier::new("publication_id") {
@@ -216,72 +360,8 @@ pub(crate) fn publication_exists(
         }
     }
 
-    // Fuzzy match within the same year
-    let year_prop = match Identifier::new("year") {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    let year_val = Json::new(json!(record.year.to_string()));
-    let type_prop = match Identifier::new(crate::db::schema::PUBLICATION_TYPE) {
-        Ok(t) => t,
-        Err(_) => return false,
-    };
-
-    // Query for papers in the same year and get their properties
-    let q_year = match RangeVertexQuery::new()
-        .t(type_prop)
-        .with_property_equal_to(year_prop, year_val)
-    {
-        Ok(q) => q,
-        Err(_) => return false,
-    };
-
-    let q_props = match q_year.properties() {
-        Ok(q) => q,
-        Err(_) => return false,
-    };
-
-    let results = match datastore.get(q_props) {
-        Ok(r) => r,
-        Err(_) => return false,
-    };
-
-    // Check each candidate publication for title and author similarity
-    if let Some(QueryOutputValue::VertexProperties(vps)) = results.first() {
-        let title_prop_name = match Identifier::new("title") {
-            Ok(n) => n,
-            Err(_) => return false,
-        };
-
-        for vp in vps {
-            // Check title similarity
-            if let Some(title_val) = vp.props.iter().find(|p| p.name == title_prop_name) {
-                let db_title = match title_val.value.as_str() {
-                    Some(s) => s,
-                    None => continue,
-                };
-
-                let cosine = Cosine::default();
-                let db_title_norm = db_title.to_lowercase();
-                let record_title_norm = record.title.to_lowercase();
-                let similarity = cosine.for_str(&record_title_norm, &db_title_norm).nval();
-
-                if similarity >= config.deduplication.title_similarity_threshold {
-                    // Title matches, check authors
-                    if check_authors_similarity(
-                        &vp.vertex.id,
-                        &record.authors,
-                        datastore,
-                        config.deduplication.author_similarity_threshold,
-                    ) {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-
-    false
+    // Fuzzy match using cache
+    dedup_cache.check_exists_and_cache(record, datastore, config)
 }
 
 /// Helper to check author similarity for a candidate publication
@@ -414,8 +494,13 @@ pub(crate) fn add_publication(
 pub(crate) fn get_or_create_author_vertex(
     author_name: &str,
     datastore: &mut Database<impl Datastore>,
+    author_cache: &mut HashMap<String, Vertex>,
 ) -> Result<Vertex, Box<dyn std::error::Error>> {
     use crate::db::schema::PERSON_TYPE;
+
+    if let Some(vertex) = author_cache.get(author_name) {
+        return Ok(vertex.clone());
+    }
 
     let person_type = Identifier::new(PERSON_TYPE)?;
 
@@ -432,6 +517,7 @@ pub(crate) fn get_or_create_author_vertex(
     if let Some(QueryOutputValue::Vertices(vertices)) = results.first()
         && let Some(vertex) = vertices.first()
     {
+        author_cache.insert(author_name.to_string(), vertex.clone());
         return Ok(vertex.clone());
     }
 
@@ -455,6 +541,7 @@ pub(crate) fn get_or_create_author_vertex(
         datastore.set_properties(q, prop_name, &json_val)?;
     }
 
+    author_cache.insert(author_name.to_string(), vertex.clone());
     Ok(vertex)
 }
 
@@ -504,11 +591,23 @@ pub(crate) fn create_coauthor_edge(
     author1: &Vertex,
     author2: &Vertex,
     datastore: &mut Database<impl Datastore>,
+    edge_cache: &mut HashMap<(Uuid, Uuid), u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::db::schema::COAUTHORED_WITH_TYPE;
 
     let edge_type = Identifier::new(COAUTHORED_WITH_TYPE)?;
     let edge = Edge::new(author1.id, edge_type, author2.id);
+    let weight_prop = Identifier::new("weight")?;
+    let key = (author1.id, author2.id);
+
+    // Check cache first
+    if let Some(&weight) = edge_cache.get(&key) {
+        let new_weight = weight + 1;
+        let q = SpecificEdgeQuery::single(edge.clone());
+        datastore.set_properties(q, weight_prop, &Json::new(json!(new_weight)))?;
+        edge_cache.insert(key, new_weight);
+        return Ok(());
+    }
 
     // Check if edge exists
     let q = SpecificEdgeQuery::single(edge.clone());
@@ -518,8 +617,6 @@ pub(crate) fn create_coauthor_edge(
         && !edges.is_empty()
     {
         // Edge exists, increment weight
-        let weight_prop = Identifier::new("weight")?;
-
         // Get current weight
         let q = SpecificEdgeQuery::single(edge.clone())
             .properties()?
@@ -546,6 +643,7 @@ pub(crate) fn create_coauthor_edge(
         let q = SpecificEdgeQuery::single(edge.clone());
         datastore.set_properties(q, weight_prop, &Json::new(json!(new_weight)))?;
 
+        edge_cache.insert(key, new_weight);
         return Ok(());
     }
 
@@ -553,9 +651,10 @@ pub(crate) fn create_coauthor_edge(
     datastore.create_edge(&edge)?;
 
     // Initialize properties
-    let weight_prop = Identifier::new("weight")?;
     let q = SpecificEdgeQuery::single(edge);
     datastore.set_properties(q, weight_prop, &Json::new(json!(1u64)))?;
+
+    edge_cache.insert(key, 1);
 
     Ok(())
 }

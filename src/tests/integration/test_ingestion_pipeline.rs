@@ -45,7 +45,7 @@ async fn test_full_pipeline_initial_mode_arxiv() -> Result<(), Box<dyn std::erro
         },
         ingestion: IngestionConfig {
             chunk_size_days: 1, // Small chunks to test chunking logic
-            initial_start_date: "2026-01-01T00:00:00Z".to_string(),
+            initial_start_date: (Utc::now() - Duration::days(2)).to_rfc3339(),
             weekly_days: 7,
             checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
         },
@@ -100,8 +100,8 @@ async fn test_full_pipeline_weekly_mode_dblp() -> Result<(), Box<dyn std::error:
             arxiv: Default::default(),
         },
         ingestion: IngestionConfig {
-            chunk_size_days: 7, // Increased to avoid excessive re-scraping of DBLP (which is year-based)
-            initial_start_date: "2024-01-01T00:00:00Z".to_string(),
+            chunk_size_days: 7,
+            initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
             weekly_days: 7,
             checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
         },
@@ -160,8 +160,8 @@ async fn test_full_pipeline_multiple_sources() -> Result<(), Box<dyn std::error:
             arxiv: Default::default(),
         },
         ingestion: IngestionConfig {
-            chunk_size_days: 7, // Increased to avoid excessive re-scraping of DBLP (which is year-based)
-            initial_start_date: "2024-01-01T00:00:00Z".to_string(),
+            chunk_size_days: 7,
+            initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
             weekly_days: 1, // Reduced to 1 to stay in 2026
             checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
         },
@@ -217,7 +217,7 @@ async fn test_checkpoint_persistence_and_resumption() -> Result<(), Box<dyn std:
         },
         ingestion: IngestionConfig {
             chunk_size_days: 1,
-            initial_start_date: "2024-01-01T00:00:00Z".to_string(),
+            initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
             weekly_days: 2,
             checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
         },
@@ -299,7 +299,7 @@ async fn test_chunking_small_range() -> Result<(), Box<dyn std::error::Error>> {
         },
         ingestion: IngestionConfig {
             chunk_size_days: 1, // 1 day chunks, so 3 day range = 3 chunks
-            initial_start_date: "2024-01-01T00:00:00Z".to_string(),
+            initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
             weekly_days: 7,
             checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
         },
@@ -349,7 +349,7 @@ async fn test_full_mode_from_beginning() -> Result<(), Box<dyn std::error::Error
         },
         ingestion: IngestionConfig {
             chunk_size_days: 365, // Large chunks to keep test reasonable
-            initial_start_date: "2024-01-01T00:00:00Z".to_string(),
+            initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
             weekly_days: 7,
             checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
         },
@@ -403,7 +403,7 @@ async fn test_invalid_mode_handling() -> Result<(), Box<dyn std::error::Error>> 
         },
         ingestion: IngestionConfig {
             chunk_size_days: 1,
-            initial_start_date: "2024-01-01T00:00:00Z".to_string(),
+            initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
             weekly_days: 7,
             checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
         },

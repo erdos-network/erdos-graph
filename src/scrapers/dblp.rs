@@ -244,8 +244,32 @@ pub async fn scrape_range_with_config(
     let end_year = end_date.year();
     let client = Client::new();
     let mut all_records = Vec::new();
+    let current_year = Utc::now().year();
 
     for year in start_year..=end_year {
+        // Optimization: For historic years, only scrape if the range includes the start of the year.
+        // This prevents re-scraping the entire year for every small time chunk (e.g. weekly).
+        // We consider "active" years to be the current and previous year.
+        let is_active_year = year >= current_year - 1;
+
+        if !is_active_year {
+            // Safe to unwrap as 1/1 is always valid
+            let jan1 = chrono::NaiveDate::from_ymd_opt(year, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc();
+
+            // Check if jan1 is within [start_date, end_date)
+            if !(start_date <= jan1 && jan1 < end_date) {
+                logger::debug(&format!(
+                    "Skipping DBLP scrape for historic year {} as range {} to {} does not include Jan 1",
+                    year, start_date, end_date
+                ));
+                continue;
+            }
+        }
+
         let mut first = 0;
         let query = format!("year:{}", year);
 
