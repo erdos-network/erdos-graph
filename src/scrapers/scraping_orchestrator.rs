@@ -3,7 +3,7 @@
 //! This module coordinates scraping from ArXiv, DBLP, and zbMATH, managing
 //! checkpointing, chunking large date ranges, and ingesting results into the database.
 
-use crate::config::load_config;
+use crate::config::{CONFIG_LOCK, load_config};
 use crate::db::ingestion::PublicationRecord;
 use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
 use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
@@ -46,7 +46,10 @@ pub async fn run_scrape(
     datastore: &mut Database<impl Datastore>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration for heartbeat timeout and polling interval
-    let config = load_config()?;
+    let config = {
+        let _guard = CONFIG_LOCK.lock().unwrap();
+        load_config()?
+    };
 
     // Define queue
     let queue = ThreadSafeQueue::new(QueueConfig::default());
@@ -170,11 +173,14 @@ pub(crate) fn publication_exists(
     datastore: &Database<impl Datastore>,
 ) -> bool {
     // Load config for thresholds
-    let config = match load_config() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to load config for deduplication: {}", e);
-            return false;
+    let config = {
+        let _guard = CONFIG_LOCK.lock().unwrap();
+        match load_config() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to load config for deduplication: {}", e);
+                return false;
+            }
         }
     };
 

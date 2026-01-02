@@ -1,0 +1,1 @@
+{"result":{"hits":{"hit":[{"info":{"authors":{"author":["Name1"]},"key":"k1","title":"T1","year":"2023"}},{"info":{"authors":{"author":[{"pid":"p2","text":"Name2"}]},"key":"k2","title":"T2","year":"2023"}}],"sent":2,"total":2}}}

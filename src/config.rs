@@ -3,7 +3,11 @@
 use serde::Deserialize;
 use std::fs;
 
-#[derive(Deserialize)]
+use std::sync::Mutex;
+
+pub static CONFIG_LOCK: Mutex<()> = Mutex::new(());
+
+#[derive(Deserialize, Clone, Debug)]
 pub struct Config {
     pub scrapers: ScraperConfig,
     pub ingestion: IngestionConfig,
@@ -12,13 +16,13 @@ pub struct Config {
     pub polling_interval_ms: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct DeduplicationConfig {
     pub title_similarity_threshold: f64,
     pub author_similarity_threshold: f64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct IngestionConfig {
     /// Size of each processing chunk in days (e.g., 1 for daily chunks)
     pub chunk_size_days: u64,
@@ -28,7 +32,7 @@ pub struct IngestionConfig {
     pub weekly_days: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct ScraperConfig {
     pub enabled: Vec<String>,
 }
