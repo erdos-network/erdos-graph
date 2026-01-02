@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::scraping_orchestrator::{
         add_publication, create_authored_edge, create_coauthor_edge, get_or_create_author_vertex,
@@ -615,9 +616,6 @@ mod tests {
         assert_eq!(weight, 2);
     }
 
-    use crate::config::CONFIG_LOCK;
-    use std::env;
-
     /// Test publication deduplication
     #[test]
     fn test_publication_exists() {
@@ -625,28 +623,20 @@ mod tests {
         let db_path = temp_dir.path().join("test_db_dedup.rocksdb");
         let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
 
-        let guard = CONFIG_LOCK.lock().unwrap();
-        // Create a basic config file for the test
-        let config_content = r#"{
-            "scrapers": { "enabled": [] },
-            "ingestion": {
-                "chunk_size_days": 1,
-                "initial_start_date": "2020-01-01T00:00:00Z",
-                "weekly_days": 7
+        let config = Config {
+            scrapers: ScraperConfig { enabled: vec![] },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
             },
-            "deduplication": {
-                "title_similarity_threshold": 0.9,
-                "author_similarity_threshold": 0.5
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
             },
-            "heartbeat_timeout_s": 30,
-            "polling_interval_ms": 100
-        }"#;
-
-        let config_path = env::current_dir().unwrap().join("config.json");
-        std::fs::write(&config_path, config_content).unwrap();
-
-        // Release lock before running function that re-locks
-        drop(guard);
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        };
 
         // Setup indexes required for publication_exists
         database
@@ -671,7 +661,7 @@ mod tests {
         add_publication(&record1, &mut database).unwrap();
 
         // Should exist
-        assert!(publication_exists(&record1, &database));
+        assert!(publication_exists(&record1, &database, &config));
 
         // Test Fuzzy Match
         let record2 = PublicationRecord {
@@ -696,7 +686,7 @@ mod tests {
         create_authored_edge(&author_v, &pub1, &mut database).unwrap();
 
         // Check if fuzzy match detects existing publication
-        assert!(publication_exists(&record2, &database));
+        assert!(publication_exists(&record2, &database, &config));
 
         // Test non-existent differing by title
         let record3 = PublicationRecord {
@@ -707,7 +697,7 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-        assert!(!publication_exists(&record3, &database));
+        assert!(!publication_exists(&record3, &database, &config));
 
         // Test non-existent differing by year
         let record4 = PublicationRecord {
@@ -718,6 +708,6 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-        assert!(!publication_exists(&record4, &database));
+        assert!(!publication_exists(&record4, &database, &config));
     }
 }

@@ -3,10 +3,6 @@
 use serde::Deserialize;
 use std::fs;
 
-use std::sync::Mutex;
-
-pub static CONFIG_LOCK: Mutex<()> = Mutex::new(());
-
 #[derive(Deserialize, Clone, Debug)]
 pub struct Config {
     pub scrapers: ScraperConfig,

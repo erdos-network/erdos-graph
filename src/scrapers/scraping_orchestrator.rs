@@ -3,7 +3,7 @@
 //! This module coordinates scraping from ArXiv, DBLP, and zbMATH, managing
 //! checkpointing, chunking large date ranges, and ingesting results into the database.
 
-use crate::config::{CONFIG_LOCK, load_config};
+use crate::config::Config;
 use crate::db::ingestion::PublicationRecord;
 use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
 use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
@@ -30,6 +30,7 @@ use textdistance::Cosine;
 /// * `end_date` - End date for scraping
 /// * `sources` - List of sources to scrape ("arxiv", "dblp", or "zbmath")
 /// * `datastore` - Mutable reference to the IndraDB datastore
+/// * `config` - Reference to the application configuration
 ///
 /// # Returns
 /// `Ok(())` on success, or an error if scraping or ingestion fails
@@ -44,13 +45,8 @@ pub async fn run_scrape(
     end_date: DateTime<Utc>,
     sources: Vec<String>,
     datastore: &mut Database<impl Datastore>,
+    config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Load configuration for heartbeat timeout and polling interval
-    let config = {
-        let _guard = CONFIG_LOCK.lock().unwrap();
-        load_config()?
-    };
-
     // Define queue
     let queue = ThreadSafeQueue::new(QueueConfig::default());
 
@@ -96,7 +92,7 @@ pub async fn run_scrape(
     loop {
         if let Some(record) = queue.dequeue() {
             // Ingest publication into db
-            if let Err(e) = ingest_publication(record, datastore).await {
+            if let Err(e) = ingest_publication(record, datastore, config).await {
                 eprintln!("Failed to ingest publication: {}", e);
             }
         } else {
@@ -123,9 +119,10 @@ pub async fn run_scrape(
 async fn ingest_publication(
     record: PublicationRecord,
     datastore: &mut Database<impl Datastore>,
+    config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Check if record already exists in the database
-    if publication_exists(&record, datastore) {
+    if publication_exists(&record, datastore, config) {
         return Ok(());
     }
 
@@ -165,25 +162,15 @@ async fn ingest_publication(
 /// # Arguments
 /// * `record` - The publication record to check
 /// * `datastore` - Reference to the IndraDB datastore
+/// * `config` - Reference to the application configuration
 ///
 /// # Returns
 /// `true` if a matching publication exists, `false` otherwise
 pub(crate) fn publication_exists(
     record: &PublicationRecord,
     datastore: &Database<impl Datastore>,
+    config: &Config,
 ) -> bool {
-    // Load config for thresholds
-    let config = {
-        let _guard = CONFIG_LOCK.lock().unwrap();
-        match load_config() {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Failed to load config for deduplication: {}", e);
-                return false;
-            }
-        }
-    };
-
     // Check exact match on publication_id
     if let Ok(id_prop) = Identifier::new("publication_id") {
         let id_val = Json::new(json!(record.id));
