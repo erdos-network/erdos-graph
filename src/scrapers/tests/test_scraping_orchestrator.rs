@@ -5,7 +5,7 @@ mod tests {
         add_publication, create_authored_edge, create_coauthor_edge, get_or_create_author_vertex,
         publication_exists,
     };
-    use crate::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
+    use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use indradb::{
         AllEdgeQuery, Edge, Identifier, QueryExt, QueryOutputValue, RangeVertexQuery,
         RocksdbDatastore, SpecificEdgeQuery, SpecificVertexQuery,

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::db::ingestion::PublicationRecord;
-    use crate::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
+    use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use std::thread;
     use std::time::Duration;
 
