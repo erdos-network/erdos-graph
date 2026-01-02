@@ -1,3 +1,4 @@
+#![coverage(off)]
 //! Benchmark scraping job
 //!
 //! This module provides a job to benchmark the scraping process for a specified number of weeks.

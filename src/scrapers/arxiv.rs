@@ -135,8 +135,8 @@ fn extract_complete_entries(
 // PublicationRecord if the entry's published date falls in [start_date, end_date).
 fn parse_entry_str(
     entry_str: &str,
-    _start_date: DateTime<Utc>,
-    _end_date: DateTime<Utc>,
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
 ) -> Option<PublicationRecord> {
     let mut reader = Reader::from_str(entry_str);
     let mut tmp = Vec::new();
@@ -231,14 +231,17 @@ fn parse_entry_str(
                 // build and return a `PublicationRecord` populated from the
                 // fields we've accumulated.
                 if e.local_name().as_ref() == b"entry" {
-                    // We trust the API to return records within the requested
-                    // lastUpdatedDate range. Filtering by published date would
-                    // incorrectly exclude older papers that were recently updated.
-                    let year = cur_published
-                        .as_ref()
-                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                        .map(|d| d.year() as u32)
-                        .unwrap_or(0);
+                    // Check if published date is valid and within range
+                    let published_str = cur_published.as_ref()?;
+                    let published_dt = DateTime::parse_from_rfc3339(published_str).ok()?;
+                    let published_utc = published_dt.with_timezone(&Utc);
+
+                    if published_utc < start_date || published_utc >= end_date {
+                        return None;
+                    }
+
+                    let year = published_utc.year() as u32;
+
                     return Some(PublicationRecord {
                         id: cur_id.take().unwrap_or_default(),
                         title: cur_title.take().unwrap_or_default(),
@@ -348,6 +351,10 @@ pub async fn scrape_range_with_config_async(
     let page_size: usize = cfg.page_size;
     let _channel_size: usize = cfg.channel_size;
     let delay_ms: u64 = cfg.delay_ms;
+
+    if start_date > end_date {
+        return Ok(Vec::new());
+    }
 
     let mut results: Vec<PublicationRecord> = Vec::new();
 

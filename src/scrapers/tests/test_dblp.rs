@@ -312,4 +312,445 @@ mod tests {
         assert!(result.is_ok());
         _m2020.assert();
     }
+
+    #[tokio::test]
+    async fn test_dblp_scraper_new() {
+        use crate::scrapers::dblp::DblpScraper;
+        let scraper = DblpScraper::new();
+        // Verify it was created successfully
+        assert_eq!(
+            format!("{:?}", scraper).contains("DblpScraper"),
+            true,
+            "Should create a DblpScraper"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dblp_scraper_default() {
+        use crate::scrapers::dblp::DblpScraper;
+        let scraper = DblpScraper::default();
+        assert_eq!(
+            format!("{:?}", scraper).contains("DblpScraper"),
+            true,
+            "Should create a DblpScraper via default"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dblp_scraper_with_config() {
+        use crate::scrapers::dblp::DblpScraper;
+        let config = DblpSourceConfig {
+            base_url: "https://test.example.com".to_string(),
+            page_size: 50,
+            delay_ms: 10,
+            enable_cache: true,
+        };
+        let scraper = DblpScraper::with_config(config);
+        assert_eq!(
+            format!("{:?}", scraper).contains("DblpScraper"),
+            true,
+            "Should create a DblpScraper with custom config"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dblp_scraper_trait_scrape_range() {
+        use crate::scrapers::dblp::DblpScraper;
+        use crate::scrapers::scraper::Scraper;
+
+        let mut server = Server::new_async().await;
+
+        let record = json!({
+            "info": {
+                "title": "Trait Test",
+                "authors": {"author": ["Test Author"]},
+                "year": "2023",
+                "key": "test/key"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response_body)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            enable_cache: false,
+        };
+
+        let scraper = DblpScraper::with_config(config);
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = scraper.scrape_range(start, end).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_scrape_range_function() {
+        let mut server = Server::new_async().await;
+
+        let record = json!({
+            "info": {
+                "title": "Function Test",
+                "authors": {"author": ["Func Author"]},
+                "year": "2022",
+                "key": "func/key"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2022.*".into()))
+            .with_status(200)
+            .with_body(response_body)
+            .create_async()
+            .await;
+
+        // Override default config to use mock server
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            enable_cache: false,
+        };
+
+        let start = Utc.with_ymd_and_hms(2022, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2022, 12, 31, 23, 59, 59).unwrap();
+
+        let result = dblp::scrape_range_with_config(start, end, config).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_http_error_handling() {
+        let mut server = Server::new_async().await;
+
+        // Return HTTP 500 error
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        // Should return Ok but with empty results due to error handling
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_malformed_json_handling() {
+        let mut server = Server::new_async().await;
+
+        // Return malformed JSON
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body("{this is not valid json")
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+
+        // Should return Ok but with empty results due to error handling
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_total_as_string() {
+        let mut server = Server::new_async().await;
+
+        let record = json!({
+            "info": {
+                "title": "String Total Test",
+                "authors": {"author": ["Author"]},
+                "year": "2023",
+                "key": "test/key"
+            }
+        });
+
+        // total as string instead of number
+        let response = json!({
+            "result": {
+                "hits": {
+                    "hit": [record],
+                    "sent": "1",
+                    "total": "1"
+                }
+            }
+        });
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response.to_string())
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_with_caching_enabled() {
+        use tempfile::TempDir;
+
+        let mut server = Server::new_async().await;
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join(".dblp_cache");
+
+        let record = json!({
+            "info": {
+                "title": "Cache Test",
+                "authors": {"author": ["Cache Author"]},
+                "year": "2023",
+                "key": "cache/key"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response_body.clone())
+            .expect(1) // Should only be called once due to caching
+            .create_async()
+            .await;
+
+        // Change to temp directory for cache
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            enable_cache: true,
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        // First call - should hit server
+        let result1 = dblp::scrape_range_with_config(start, end, config.clone()).await;
+        assert!(result1.is_ok());
+        assert_eq!(result1.unwrap().len(), 1);
+
+        // Second call - should use cache
+        let result2 = dblp::scrape_range_with_config(start, end, config).await;
+        assert!(result2.is_ok());
+        assert_eq!(result2.unwrap().len(), 1);
+
+        // Verify cache directory was created
+        assert!(cache_dir.exists());
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_dblp_single_author_as_object() {
+        let mut server = Server::new_async().await;
+
+        // Single author as object (not array)
+        let record = json!({
+            "info": {
+                "title": "Single Author Test",
+                "authors": {"author": {"text": "Solo Author", "pid": "123"}},
+                "year": "2023",
+                "key": "single/key"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response_body)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].authors, vec!["Solo Author"]);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_title_as_array() {
+        let mut server = Server::new_async().await;
+
+        // Title as array
+        let record = json!({
+            "info": {
+                "title": ["Part 1", "Part 2"],
+                "authors": {"author": ["Author"]},
+                "year": "2023",
+                "key": "array/key"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response_body)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Part 1 Part 2");
+    }
+
+    #[tokio::test]
+    async fn test_dblp_venue_as_array() {
+        let mut server = Server::new_async().await;
+
+        // Venue as array
+        let record = json!({
+            "info": {
+                "title": "Venue Array Test",
+                "authors": {"author": ["Author"]},
+                "year": "2023",
+                "venue": ["Conference", "Workshop"],
+                "key": "venue/key"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response_body)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].venue, Some("Conference, Workshop".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_dblp_empty_title_filtered() {
+        let mut server = Server::new_async().await;
+
+        // Empty or whitespace title
+        let record = json!({
+            "info": {
+                "title": "   ",
+                "authors": {"author": ["Author"]},
+                "year": "2023",
+                "key": "empty/key"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response_body)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        // Should be filtered out
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_missing_key_uses_default() {
+        let mut server = Server::new_async().await;
+
+        // No key field
+        let record = json!({
+            "info": {
+                "title": "No Key Test",
+                "authors": {"author": ["Author"]},
+                "year": "2023"
+            }
+        });
+
+        let response_body = create_dblp_json_response(&[record]);
+
+        let _mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
+            .with_status(200)
+            .with_body(response_body)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "unknown");
+    }
 }

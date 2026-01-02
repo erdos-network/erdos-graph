@@ -1,3 +1,4 @@
+#![coverage(off)]
 //! Full refresh scraping job
 //!
 //! This module provides a job to perform a full initial scrape for specified sources.

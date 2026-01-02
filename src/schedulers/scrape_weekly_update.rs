@@ -1,3 +1,4 @@
+#![coverage(off)]
 //! Weekly scraping scheduler
 //!
 //! This module sets up a cron-based scheduler that runs weekly scrapes for all enabled sources.

@@ -626,6 +626,13 @@ mod tests {
         assert_eq!(weight, 2);
     }
 
+    /// Test DeduplicationCache::new
+    #[test]
+    fn test_deduplication_cache_new() {
+        let _cache = DeduplicationCache::new();
+        // Verify it's created without panicking
+    }
+
     /// Test publication deduplication
     #[test]
     fn test_publication_exists() {
@@ -748,5 +755,398 @@ mod tests {
             &config,
             &mut dedup_cache
         ));
+    }
+
+    /// Test publication_exists with empty author list
+    #[test]
+    fn test_publication_exists_empty_authors() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_empty_authors.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec![],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+            },
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        };
+
+        database
+            .index_property(Identifier::new("publication_id").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("year").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap();
+
+        // Create a publication with no authors
+        let record = PublicationRecord {
+            id: "test:123".to_string(),
+            title: "No Authors Paper".to_string(),
+            authors: vec![],
+            year: 2023,
+            venue: None,
+            source: "test".to_string(),
+        };
+
+        add_publication(&record, &mut database).unwrap();
+
+        let mut dedup_cache = DeduplicationCache::new();
+
+        // Check if it exists
+        let exists = publication_exists(&record, &database, &config, &mut dedup_cache);
+
+        // Should exist by exact ID match
+        assert!(exists);
+    }
+
+    /// Test publication_exists with invalid identifier
+    #[test]
+    fn test_publication_exists_invalid_identifier() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_invalid_id.rocksdb");
+        let database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec![],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+            },
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        };
+
+        let record = PublicationRecord {
+            id: "test:123".to_string(),
+            title: "Test".to_string(),
+            authors: vec!["Author".to_string()],
+            year: 2023,
+            venue: None,
+            source: "test".to_string(),
+        };
+
+        let mut dedup_cache = DeduplicationCache::new();
+
+        // Should return false without crashing
+        let exists = publication_exists(&record, &database, &config, &mut dedup_cache);
+        assert!(!exists);
+    }
+
+    /// Test coauthor edge weight increment with string weight
+    #[test]
+    fn test_coauthor_edge_weight_string_format() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_weight_string.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap();
+
+        let mut author_cache = HashMap::new();
+        let author1 =
+            get_or_create_author_vertex("Alice", &mut database, &mut author_cache).unwrap();
+        let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
+
+        let mut edge_cache = HashMap::new();
+
+        // Create initial edge
+        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+
+        // Manually set weight as string (simulating legacy data)
+        use crate::db::schema::COAUTHORED_WITH_TYPE;
+        use indradb::{Edge, Json};
+        use serde_json::json;
+
+        let edge_type = Identifier::new(COAUTHORED_WITH_TYPE).unwrap();
+        let edge = Edge::new(author1.id, edge_type, author2.id);
+        let weight_prop = Identifier::new("weight").unwrap();
+        let q = SpecificEdgeQuery::single(edge.clone());
+        database
+            .set_properties(q, weight_prop, &Json::new(json!("1")))
+            .unwrap();
+
+        // Clear cache to force DB read
+        edge_cache.clear();
+
+        // Increment weight - should handle string format
+        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+
+        // Verify weight was incremented
+        let q = SpecificEdgeQuery::single(edge.clone())
+            .properties()
+            .unwrap()
+            .name(weight_prop);
+        let results = database.get(q).unwrap();
+
+        let weight = results
+            .first()
+            .and_then(|res| match res {
+                QueryOutputValue::EdgeProperties(props) => props.first(),
+                _ => None,
+            })
+            .and_then(|prop| prop.props.first())
+            .and_then(|p| p.value.as_u64())
+            .unwrap();
+
+        assert_eq!(weight, 2);
+    }
+
+    /// Test add_publication with all fields
+    #[test]
+    fn test_add_publication_complete() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_pub_complete.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        let record = PublicationRecord {
+            id: "complete:123".to_string(),
+            title: "Complete Publication".to_string(),
+            authors: vec!["Author One".to_string(), "Author Two".to_string()],
+            year: 2024,
+            venue: Some("Top Conference".to_string()),
+            source: "test".to_string(),
+        };
+
+        let vertex = add_publication(&record, &mut database).unwrap();
+
+        // Verify all properties were set
+        let q = SpecificVertexQuery::single(vertex.id).properties().unwrap();
+        let results = database.get(q).unwrap();
+        let vertex_props = match &results[0] {
+            QueryOutputValue::VertexProperties(vps) => &vps[0],
+            _ => panic!("Expected vertex properties"),
+        };
+
+        assert!(vertex_props.props.len() >= 4);
+    }
+
+    /// Test get_or_create_author_vertex with cache hit
+    #[test]
+    fn test_get_or_create_author_cache_hit() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_author_cache.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap();
+
+        let mut author_cache = HashMap::new();
+        let author_name = "Cached Author";
+
+        // First call - creates and caches
+        let vertex1 =
+            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
+
+        // Second call - should use cache
+        let vertex2 =
+            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
+
+        assert_eq!(vertex1.id, vertex2.id);
+
+        // Verify only one vertex was created in DB
+        let q = RangeVertexQuery::new().t(Identifier::new("Person").unwrap());
+        let results = database.get(q).unwrap();
+        match &results[0] {
+            QueryOutputValue::Vertices(v) => assert_eq!(v.len(), 1),
+            _ => panic!("Expected vertices"),
+        };
+    }
+
+    /// Test create_coauthor_edge with cache hit
+    #[test]
+    fn test_create_coauthor_edge_cache_hit() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_coauthor_cache.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap();
+
+        let mut author_cache = HashMap::new();
+        let author1 =
+            get_or_create_author_vertex("Alice", &mut database, &mut author_cache).unwrap();
+        let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
+
+        let mut edge_cache = HashMap::new();
+
+        // Create edge - populates cache
+        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+
+        // Increment using cache
+        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+
+        // Verify cache was used
+        let key = (author1.id, author2.id);
+        assert!(edge_cache.contains_key(&key));
+        assert_eq!(*edge_cache.get(&key).unwrap(), 2);
+    }
+
+    /// Test DeduplicationCache with multiple publications in same year
+    #[test]
+    fn test_deduplication_cache_multiple_publications() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_cache_multi.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec![],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+            },
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        };
+
+        database
+            .index_property(Identifier::new("publication_id").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("year").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap();
+
+        // Add multiple publications to DB
+        let record1 = PublicationRecord {
+            id: "pub1:123".to_string(),
+            title: "First Paper 2021".to_string(),
+            authors: vec!["Author A".to_string()],
+            year: 2021,
+            venue: None,
+            source: "test".to_string(),
+        };
+        let record2 = PublicationRecord {
+            id: "pub2:456".to_string(),
+            title: "Second Paper 2021".to_string(),
+            authors: vec!["Author B".to_string()],
+            year: 2021,
+            venue: None,
+            source: "test".to_string(),
+        };
+
+        add_publication(&record1, &mut database).unwrap();
+        add_publication(&record2, &mut database).unwrap();
+
+        let mut dedup_cache = DeduplicationCache::new();
+
+        // Check for a third paper in the same year - should populate cache with both existing papers
+        let record3 = PublicationRecord {
+            id: "pub3:789".to_string(),
+            title: "Third Paper 2021".to_string(),
+            authors: vec!["Author C".to_string()],
+            year: 2021,
+            venue: None,
+            source: "test".to_string(),
+        };
+
+        let exists = publication_exists(&record3, &database, &config, &mut dedup_cache);
+        assert!(!exists);
+    }
+
+    /// Test publication_exists with cache population
+    #[test]
+    fn test_publication_exists_populates_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_cache_populate.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec![],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+            },
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        };
+
+        database
+            .index_property(Identifier::new("publication_id").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("year").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap();
+
+        // Add a publication to DB
+        let record1 = PublicationRecord {
+            id: "existing:123".to_string(),
+            title: "Existing Paper".to_string(),
+            authors: vec!["Author A".to_string()],
+            year: 2023,
+            venue: None,
+            source: "test".to_string(),
+        };
+        add_publication(&record1, &mut database).unwrap();
+
+        let mut dedup_cache = DeduplicationCache::new();
+
+        // Check for a different paper in the same year
+        let record2 = PublicationRecord {
+            id: "new:456".to_string(),
+            title: "Different Paper".to_string(),
+            authors: vec!["Author B".to_string()],
+            year: 2023,
+            venue: None,
+            source: "test".to_string(),
+        };
+
+        let exists = publication_exists(&record2, &database, &config, &mut dedup_cache);
+
+        // Should not exist
+        assert!(!exists);
     }
 }

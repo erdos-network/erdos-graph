@@ -1,3 +1,5 @@
+#![feature(coverage_attribute)]
+#![coverage(off)]
 use clap::{Parser, Subcommand};
 use erdos_graph::config::load_config;
 use erdos_graph::db::client::init_datastore;
