@@ -5,3 +5,6 @@ pub mod db;
 pub mod logger;
 pub mod scrapers;
 pub mod utilities;
+
+#[cfg(test)]
+pub mod tests;

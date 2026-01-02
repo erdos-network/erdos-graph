@@ -1,16 +1,18 @@
 {
-  "scrapers": {
-    "enabled": ["arxiv", "dblp"]
-  },
-  "ingestion": {
-    "chunk_size_days": 1,
-    "initial_start_date": "1932-01-01T00:00:00Z",
-    "weekly_days": 7
-  },
-  "deduplication": {
-    "title_similarity_threshold": 0.9,
-    "author_similarity_threshold": 0.5
-  },
-  "heartbeat_timeout_s": 30,
-  "polling_interval_ms": 100
+    "scrapers": {
+        "enabled": [
+            "dblp"
+        ]
+    },
+    "ingestion": {
+        "chunk_size_days": 1,
+        "initial_start_date": "1930-01-01T00:00:00Z",
+        "weekly_days": 7
+    },
+    "deduplication": {
+        "title_similarity_threshold": 0.9,
+        "author_similarity_threshold": 0.5
+    },
+    "heartbeat_timeout_s": 30,
+    "polling_interval_ms": 100
 }
