@@ -5,7 +5,7 @@
 
 use crate::config::load_config;
 use crate::db::ingestion::PublicationRecord;
-use crate::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
+use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
 use chrono::{DateTime, Utc};
 use indradb::{
     Database, Datastore, Edge, Identifier, Json, QueryExt, QueryOutputValue, RangeVertexQuery,
