@@ -77,9 +77,9 @@ pub struct DblpConfig {
 
 impl Default for DblpConfig {
     fn default() -> Self {
-        Self {
-            base_url: "https://dblp.org/xml/dblp.xml.gz".to_string(),
-        }
+        let base_url = std::env::var("DBLP_BASE_URL")
+            .unwrap_or_else(|_| "https://dblp.org/xml/dblp.xml.gz".to_string());
+        Self { base_url }
     }
 }
 
