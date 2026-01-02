@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use erdos_graph::config::load_config;
 use erdos_graph::db::client::init_datastore;
+use erdos_graph::logger::{self, AsyncLogger, init_logger};
 use erdos_graph::schedulers::{scrape_benchmark, scrape_full_refresh, scrape_weekly_update};
 use std::path::Path;
 use std::sync::Arc;
@@ -38,6 +39,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logger
+    init_logger(AsyncLogger::new());
+
     let cli = Cli::parse();
 
     // Load config
@@ -49,13 +53,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Daemon => {
-            println!("Starting weekly scheduler daemon...");
+            logger::info("Starting weekly scheduler daemon...");
             let scheduler = scrape_weekly_update::start_weekly_scraper(config, datastore).await?;
             scheduler.start().await?;
 
-            println!("Daemon running. Press Ctrl+C to stop.");
+            logger::info("Daemon running. Press Ctrl+C to stop.");
             tokio::signal::ctrl_c().await?;
-            println!("Shutting down...");
+            logger::info("Shutting down...");
         }
         Commands::FullRefresh { sources } => {
             scrape_full_refresh::run_full_refresh(sources, config, datastore).await?;

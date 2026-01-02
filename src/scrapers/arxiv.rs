@@ -1,4 +1,5 @@
 use crate::db::ingestion::PublicationRecord;
+use crate::logger;
 use crate::scrapers::scraper::Scraper;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
@@ -381,6 +382,8 @@ pub async fn scrape_range_with_config_async(
             cfg.base_url, start_str, end_str, start, page_size
         );
 
+        logger::debug(&format!("Fetching ArXiv page: {}", url));
+
         // Sliding-window streaming parser: accumulate chunks and extract <entry> slices
         let mut resp = client.get(&url).send().await?;
         // Remember how many results we had before this page so we can decide
@@ -406,6 +409,7 @@ pub async fn scrape_range_with_config_async(
 
         // If fewer entries were added than page_size, we've reached the end
         let added = results.len() - prev_results_len;
+        logger::debug(&format!("Parsed {} records from this page", added));
         if added < page_size {
             break;
         }

@@ -3,6 +3,7 @@
 //! This module handles orchestrating the scraping process, including date range calculation,
 //! chunking, and checkpoint management.
 
+use crate::logger;
 use chrono::{DateTime, Duration, Utc};
 use indradb::{Database, Datastore};
 use std::fs;
@@ -47,11 +48,13 @@ pub fn get_checkpoint(
 ) -> Result<Option<DateTime<Utc>>, Box<dyn std::error::Error>> {
     let path = base_path.join(format!("{}.txt", source));
     if path.exists() {
-        let content = fs::read_to_string(path)?;
+        let content = fs::read_to_string(&path)?;
+        logger::debug(&format!("Read checkpoint for {}: {}", source, content));
         Ok(Some(
             DateTime::parse_from_rfc3339(&content)?.with_timezone(&Utc),
         ))
     } else {
+        logger::debug(&format!("No checkpoint found for {}", source));
         Ok(None)
     }
 }
@@ -72,6 +75,11 @@ pub fn set_checkpoint(
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(base_path)?;
     fs::write(base_path.join(format!("{}.txt", source)), date.to_rfc3339())?;
+    logger::info(&format!(
+        "Updated checkpoint for {} to {}",
+        source,
+        date.to_rfc3339()
+    ));
     Ok(())
 }
 
@@ -100,6 +108,11 @@ pub async fn orchestrate_scraping_and_ingestion(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::scrapers::scraping_orchestrator::run_scrape;
 
+    logger::info(&format!(
+        "Orchestrating scraping for sources: {:?} in mode: {}",
+        sources, mode
+    ));
+
     let default_checkpoint_dir = "checkpoints".to_string();
     let checkpoint_dir = config
         .ingestion
@@ -112,11 +125,29 @@ pub async fn orchestrate_scraping_and_ingestion(
     let (start_date, end_date) =
         calculate_date_range(mode, &sources, &config.ingestion, checkpoint_path)?;
 
+    logger::info(&format!(
+        "Calculated date range: {} to {}",
+        start_date, end_date
+    ));
+
     // Break date range into chunks
     let chunks = chunk_date_range(start_date, end_date, config.ingestion.chunk_size_days)?;
+    let total_chunks = chunks.len();
+    logger::info(&format!(
+        "Split date range into {} chunks of {} days",
+        total_chunks, config.ingestion.chunk_size_days
+    ));
 
     // Run run_scrape for each chunk (all sources in parallel) and update checkpoints
-    for (chunk_start, chunk_end) in chunks {
+    for (i, (chunk_start, chunk_end)) in chunks.into_iter().enumerate() {
+        logger::info(&format!(
+            "Processing chunk {}/{}: {} to {}",
+            i + 1,
+            total_chunks,
+            chunk_start,
+            chunk_end
+        ));
+
         // Pass sources list to run_scrape
         run_scrape(chunk_start, chunk_end, sources.clone(), datastore, config).await?;
 

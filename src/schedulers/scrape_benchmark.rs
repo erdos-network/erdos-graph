@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::db::ingestion::orchestrate_scraping_and_ingestion;
+use crate::logger;
 use indradb::{Database, Datastore};
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,10 +32,10 @@ pub async fn run_benchmark<D: Datastore + Send + 'static>(
     datastore: Arc<Mutex<Database<D>>>,
 ) -> Result<std::time::Duration, Box<dyn std::error::Error>> {
     let sources = config.scrapers.enabled.clone();
-    println!(
+    logger::info(&format!(
         "Starting benchmark scrape for {} weeks on sources: {:?}",
         num_weeks, sources
-    );
+    ));
 
     // Create temporary directory for checkpoints to isolate benchmark
     // This ensures we scrape the full requested duration regardless of existing checkpoints
@@ -54,14 +55,14 @@ pub async fn run_benchmark<D: Datastore + Send + 'static>(
     match orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut *db, &config).await {
         Ok(_) => {
             let duration = start_time.elapsed();
-            println!(
+            logger::info(&format!(
                 "Benchmark completed successfully. Elapsed time: {:.2} seconds",
                 duration.as_secs_f64()
-            );
+            ));
             Ok(duration)
         }
         Err(e) => {
-            eprintln!("Benchmark failed: {}", e);
+            logger::error(&format!("Benchmark failed: {}", e));
             Err(e)
         }
     }

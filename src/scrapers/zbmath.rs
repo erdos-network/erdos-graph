@@ -1,4 +1,5 @@
 use crate::db::ingestion::PublicationRecord;
+use crate::logger;
 use crate::scrapers::scraper::Scraper;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -217,6 +218,8 @@ pub async fn scrape_chunk_with_config(
             params.push(("until", end_date.format("%Y-%m-%dT%H:%M:%SZ").to_string()));
         }
 
+        logger::debug(&format!("Fetching zbMATH records: {:?}", params));
+
         let response = client
             .get(&config.base_url)
             .query(&params)
@@ -234,11 +237,11 @@ pub async fn scrape_chunk_with_config(
                     match error.code.as_str() {
                         "noRecordsMatch" => {
                             // No records for this date range - that's okay
-                            println!(
+                            logger::info(&format!(
                                 "No records found for date range {} to {}",
                                 start_date.format("%Y-%m-%d"),
                                 end_date.format("%Y-%m-%d")
-                            );
+                            ));
                             break;
                         }
                         "badArgument" => {
@@ -273,6 +276,10 @@ pub async fn scrape_chunk_with_config(
         }
 
         if let Some(list_records) = oai_response.list_records {
+            logger::debug(&format!(
+                "Found {} records in this chunk",
+                list_records.records.len()
+            ));
             // Convert OAI-PMH records to PublicationRecord
             for record in list_records.records {
                 if let Some(publication) = convert_to_publication_record(record)? {

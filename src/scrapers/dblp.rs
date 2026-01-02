@@ -29,6 +29,7 @@
 //! ```
 
 use crate::db::ingestion::PublicationRecord;
+use crate::logger;
 use crate::scrapers::scraper::Scraper;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
@@ -254,11 +255,13 @@ pub async fn scrape_range_with_config(
                 config.base_url, query, config.page_size, first
             );
 
+            logger::debug(&format!("Fetching DBLP URL: {}", url));
+
             // Use cached fetch if available
             let body_text = match fetch_url_cached(&client, &url, config.enable_cache).await {
                 Ok(text) => text,
                 Err(e) => {
-                    eprintln!("Failed to fetch URL {}: {}", url, e);
+                    logger::error(&format!("Failed to fetch URL {}: {}", url, e));
                     break;
                 }
             };
@@ -268,7 +271,7 @@ pub async fn scrape_range_with_config(
             let dblp_resp: DblpResponse = match serde_json::from_str(&body_text) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("Failed to parse DBLP JSON: {}", e);
+                    logger::error(&format!("Failed to parse DBLP JSON: {}", e));
                     break;
                 }
             };

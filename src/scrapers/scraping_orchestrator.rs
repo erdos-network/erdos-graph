@@ -5,6 +5,7 @@
 
 use crate::config::Config;
 use crate::db::ingestion::PublicationRecord;
+use crate::logger;
 use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
 use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
 use chrono::{DateTime, Utc};
@@ -50,10 +51,16 @@ pub async fn run_scrape(
     // Define queue
     let queue = ThreadSafeQueue::new(QueueConfig::default());
 
+    logger::info(&format!(
+        "Starting scraping for range {} to {}",
+        start_date, end_date
+    ));
+
     // Define vector of tasks to process
     let mut tasks = vec![];
 
     for src in &sources {
+        logger::info(&format!("Spawning scraper task for {}", src));
         // Create producer task for each source
         let producer = queue.create_producer();
         let src_name = src.clone();
@@ -67,21 +74,31 @@ pub async fn run_scrape(
                 "dblp" => Box::new(DblpScraper::with_config(scraper_config.dblp)),
                 "zbmath" => Box::new(ZbmathScraper::new()), // Zbmath not updated yet
                 _ => {
-                    eprintln!("Unknown source: {}", src_name);
+                    logger::error(&format!("Unknown source: {}", src_name));
                     return;
                 }
             };
 
+            logger::info(&format!("{} scraper started", src_name));
             match scraper.scrape_range(start, end).await {
                 Ok(records) => {
+                    let count = records.len();
+                    logger::info(&format!(
+                        "{} scraper finished, found {} records",
+                        src_name, count
+                    ));
                     for record in records {
                         if let Err(e) = producer.submit(record) {
-                            eprintln!("Failed to submit record from {}: {}", src_name, e);
+                            logger::error(&format!(
+                                "Failed to submit record from {}: {}",
+                                src_name, e
+                            ));
                         }
                     }
+                    logger::info(&format!("{} scraper finished submitting records", src_name));
                 }
                 Err(e) => {
-                    eprintln!("Scraping failed for {}: {}", src_name, e);
+                    logger::error(&format!("Scraping failed for {}: {}", src_name, e));
                 }
             }
         });
@@ -90,11 +107,16 @@ pub async fn run_scrape(
     }
 
     // Consumer loop
+    let mut ingested_count = 0;
     loop {
         if let Some(record) = queue.dequeue() {
             // Ingest publication into db
             if let Err(e) = ingest_publication(record, datastore, config).await {
-                eprintln!("Failed to ingest publication: {}", e);
+                logger::error(&format!("Failed to ingest publication: {}", e));
+            }
+            ingested_count += 1;
+            if ingested_count % 100 == 0 {
+                logger::info(&format!("Ingested {} records", ingested_count));
             }
         } else {
             if queue.producers_finished() {
@@ -112,6 +134,8 @@ pub async fn run_scrape(
     for task in tasks {
         let _ = task.await;
     }
+
+    logger::info("Scraping orchestration finished for current chunk");
 
     Ok(())
 }
