@@ -9,6 +9,10 @@
 //! - Add an environment-configurable global logger facade
 //! - Add structured fields (key=value) support
 //! - Add async, buffered writer with backpressure and flush control
+//!
+
+use crossbeam_channel::{Sender, bounded};
+use std::thread;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
@@ -80,28 +84,75 @@ impl Logger for NoopLogger {
     }
 }
 
-/// Very small stdout logger for quick debugging.
-///
-/// NOTE: This is a stub and formatting is intentionally minimal.
-/// TODO: Add timestamps and consistent formatting; gate by minimum level.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct StdoutLogger;
+enum LogMsg {
+    Record {
+        level: LogLevel,
+        message: String,
+        timestamp: String,
+    },
+    Flush(Sender<()>),
+}
 
-impl Logger for StdoutLogger {
-    fn log(&self, level: LogLevel, message: &str) {
-        // Emit a small JSON object to stdout so logs are easier to parse
-        // by structured log collectors. Keep the shape minimal for now.
-        let ts = chrono::Utc::now().to_rfc3339();
-        // Example: {"ts":"...","level":"INFO","msg":"..."}
-        let json = serde_json::json!({
-            "ts": ts,
-            "level": level.as_str(),
-            "msg": message,
+/// Async threaded logger for minimal overhead on the calling thread.
+///
+/// This logger spawns a background thread that prints logs to stdout.
+/// It uses a bounded channel to prevent unbounded memory usage if the
+/// writer cannot keep up.
+#[derive(Debug, Clone)]
+pub struct AsyncLogger {
+    sender: Sender<LogMsg>,
+}
+
+impl AsyncLogger {
+    pub fn new() -> Self {
+        let (tx, rx) = bounded(2048);
+
+        thread::spawn(move || {
+            while let Ok(msg) = rx.recv() {
+                match msg {
+                    LogMsg::Record {
+                        level,
+                        message,
+                        timestamp,
+                    } => {
+                        let json = serde_json::json!({
+                            "ts": timestamp,
+                            "level": level.as_str(),
+                            "msg": message,
+                        });
+                        println!("{}", json);
+                    }
+                    LogMsg::Flush(ack_tx) => {
+                        let _ = ack_tx.send(());
+                    }
+                }
+            }
         });
-        println!("{}", json);
+
+        Self { sender: tx }
+    }
+}
+
+impl Default for AsyncLogger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Logger for AsyncLogger {
+    fn log(&self, level: LogLevel, message: &str) {
+        let ts = chrono::Utc::now().to_rfc3339();
+        let _ = self.sender.send(LogMsg::Record {
+            level,
+            message: message.to_string(),
+            timestamp: ts,
+        });
     }
 
     fn flush(&self) {
-        // stdout is line-buffered; nothing to do for the stub
+        let (ack_tx, ack_rx) = bounded(1);
+        if self.sender.send(LogMsg::Flush(ack_tx)).is_ok() {
+            let _ = ack_rx.recv();
+        }
     }
 }
