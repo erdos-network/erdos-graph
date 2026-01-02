@@ -74,22 +74,6 @@ fn extract_primary_category_from_attrs(e: &BytesStart) -> Option<String> {
     None
 }
 
-// Returns true if the optional publication date parses and falls in
-// [start_date, end_date).
-fn published_in_range(
-    pubdate_opt: &Option<String>,
-    start_date: DateTime<Utc>,
-    end_date: DateTime<Utc>,
-) -> bool {
-    pubdate_opt
-        .as_ref()
-        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-        .map(|dt| {
-            let dt_utc = dt.with_timezone(&Utc);
-            dt_utc >= start_date && dt_utc < end_date
-        })
-        .unwrap_or(false)
-}
 /// Find a subslice `needle` in `hay` and return the byte index if present.
 ///
 /// This is a tiny, allocation-free byte-search helper used by the
@@ -126,6 +110,7 @@ fn extract_complete_entries(
     loop {
         let start_opt = find_subslice(buf_acc, b"<entry");
         if start_opt.is_none() {
+            // logger::debug("No <entry> start found in buffer");
             break;
         }
         let start = start_opt.unwrap();
@@ -150,8 +135,8 @@ fn extract_complete_entries(
 // PublicationRecord if the entry's published date falls in [start_date, end_date).
 fn parse_entry_str(
     entry_str: &str,
-    start_date: DateTime<Utc>,
-    end_date: DateTime<Utc>,
+    _start_date: DateTime<Utc>,
+    _end_date: DateTime<Utc>,
 ) -> Option<PublicationRecord> {
     let mut reader = Reader::from_str(entry_str);
     let mut tmp = Vec::new();
@@ -243,33 +228,27 @@ fn parse_entry_str(
             }
             Ok(Event::End(ref e)) => {
                 // On End events, if we've reached the end of an `<entry>`,
-                // decide whether the entry's published date falls inside the
-                // requested window and, if so, build and return a
-                // `PublicationRecord` populated from the fields we've
-                // accumulated. If not included, we break to indicate no
-                // matching record was produced from this slice.
+                // build and return a `PublicationRecord` populated from the
+                // fields we've accumulated.
                 if e.local_name().as_ref() == b"entry" {
-                    let include = published_in_range(&cur_published, start_date, end_date);
-                    if include {
-                        let year = cur_published
-                            .as_ref()
-                            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                            .map(|d| d.year() as u32)
-                            .unwrap_or(0);
-                        return Some(PublicationRecord {
-                            id: cur_id.take().unwrap_or_default(),
-                            title: cur_title.take().unwrap_or_default(),
-                            authors: cur_authors.clone(),
-                            year,
-                            // Prefer journal reference; fall back to primary
-                            // category when journal_ref is absent.
-                            venue: cur_journal_ref.take().or(cur_primary_cat.take()),
-                            source: String::from("arxiv"),
-                        });
-                    }
-                    // No matching record for this entry, stop parsing this
-                    // slice and return None to the caller.
-                    break;
+                    // We trust the API to return records within the requested
+                    // lastUpdatedDate range. Filtering by published date would
+                    // incorrectly exclude older papers that were recently updated.
+                    let year = cur_published
+                        .as_ref()
+                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                        .map(|d| d.year() as u32)
+                        .unwrap_or(0);
+                    return Some(PublicationRecord {
+                        id: cur_id.take().unwrap_or_default(),
+                        title: cur_title.take().unwrap_or_default(),
+                        authors: cur_authors.clone(),
+                        year,
+                        // Prefer journal reference; fall back to primary
+                        // category when journal_ref is absent.
+                        venue: cur_journal_ref.take().or(cur_primary_cat.take()),
+                        source: String::from("arxiv"),
+                    });
                 }
             }
             Ok(Event::Eof) => break,

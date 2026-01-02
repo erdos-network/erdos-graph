@@ -10,7 +10,7 @@
             "delay_ms": 200
         },
         "arxiv": {
-            "base_url": "http://export.arxiv.org/api/query",
+            "base_url": "https://export.arxiv.org/api/query",
             "page_size": 1000,
             "channel_size": 8,
             "delay_ms": 200
