@@ -16,6 +16,12 @@ pub struct Config {
 pub struct DeduplicationConfig {
     pub title_similarity_threshold: f64,
     pub author_similarity_threshold: f64,
+    #[serde(default = "default_bloom_filter_size")]
+    pub bloom_filter_size: usize,
+}
+
+fn default_bloom_filter_size() -> usize {
+    200_000
 }
 
 #[derive(Deserialize, Clone, Debug)]

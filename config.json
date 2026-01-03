@@ -23,7 +23,8 @@
     },
     "deduplication": {
         "title_similarity_threshold": 0.9,
-        "author_similarity_threshold": 0.5
+        "author_similarity_threshold": 0.5,
+        "bloom_filter_size": 5000000
     },
     "heartbeat_timeout_s": 30,
     "polling_interval_ms": 100
