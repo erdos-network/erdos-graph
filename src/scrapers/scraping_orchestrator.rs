@@ -118,15 +118,15 @@ impl DeduplicationCache {
                         let similarity =
                             cosine.for_str(&record_title_lower, &db_title_lower).nval();
 
-                        if similarity >= config.deduplication.title_similarity_threshold {
-                            if check_authors_similarity(
+                        if similarity >= config.deduplication.title_similarity_threshold
+                            && check_authors_similarity(
                                 &vp.vertex.id,
                                 &record.authors,
                                 datastore,
                                 config.deduplication.author_similarity_threshold,
-                            ) {
-                                return true;
-                            }
+                            )
+                        {
+                            return true;
                         }
                     }
                 }
@@ -179,15 +179,13 @@ impl DeduplicationCache {
                             && let Ok(results) = datastore.get(q_props)
                             && let Some(QueryOutputValue::VertexProperties(author_vps)) =
                                 results.first()
+                            && let Ok(name_prop) = Identifier::new("name")
                         {
-                            if let Ok(name_prop) = Identifier::new("name") {
-                                for avp in author_vps {
-                                    if let Some(val) =
-                                        avp.props.iter().find(|p| p.name == name_prop)
-                                        && let Some(name) = val.value.as_str()
-                                    {
-                                        self.author_filter.set(&normalize_title(name));
-                                    }
+                            for avp in author_vps {
+                                if let Some(val) = avp.props.iter().find(|p| p.name == name_prop)
+                                    && let Some(name) = val.value.as_str()
+                                {
+                                    self.author_filter.set(&normalize_title(name));
                                 }
                             }
                         }
