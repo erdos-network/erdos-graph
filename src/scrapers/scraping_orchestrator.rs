@@ -102,33 +102,30 @@ impl DeduplicationCache {
                 .t(type_prop)
                 .with_property_equal_to(year_prop, year_val);
 
-            if let Ok(q) = q {
-                // Get properties
-                if let Ok(q_props) = q.properties() {
-                    if let Ok(results) = datastore.get(q_props) {
-                        if let Some(QueryOutputValue::VertexProperties(vps)) = results.first() {
-                            let mut list = Vec::new();
-                            for vp in vps {
-                                if let Some(val) = vp.props.iter().find(|p| p.name == title_prop)
-                                    && let Some(title) = val.value.as_str()
-                                {
-                                    list.push(DeduplicationCandidate {
-                                        id: vp.vertex.id,
-                                        title: title.to_string(),
-                                    });
-                                }
-                            }
-                            logger::info(&format!(
-                                "Populated cache for year {}: {} candidates in {}ms",
-                                year,
-                                list.len(),
-                                start.elapsed().as_millis()
-                            ));
-                            self.candidates_by_year.insert(year, list);
-                            return;
-                        }
+            if let Ok(q) = q
+                && let Ok(q_props) = q.properties()
+                && let Ok(results) = datastore.get(q_props)
+                && let Some(QueryOutputValue::VertexProperties(vps)) = results.first()
+            {
+                let mut list = Vec::new();
+                for vp in vps {
+                    if let Some(val) = vp.props.iter().find(|p| p.name == title_prop)
+                        && let Some(title) = val.value.as_str()
+                    {
+                        list.push(DeduplicationCandidate {
+                            id: vp.vertex.id,
+                            title: title.to_string(),
+                        });
                     }
                 }
+                logger::info(&format!(
+                    "Populated cache for year {}: {} candidates in {}ms",
+                    year,
+                    list.len(),
+                    start.elapsed().as_millis()
+                ));
+                self.candidates_by_year.insert(year, list);
+                return;
             }
         }
         // If failed or empty, insert empty list

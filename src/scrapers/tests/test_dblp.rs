@@ -318,9 +318,8 @@ mod tests {
         use crate::scrapers::dblp::DblpScraper;
         let scraper = DblpScraper::new();
         // Verify it was created successfully
-        assert_eq!(
+        assert!(
             format!("{:?}", scraper).contains("DblpScraper"),
-            true,
             "Should create a DblpScraper"
         );
     }
@@ -329,9 +328,8 @@ mod tests {
     async fn test_dblp_scraper_default() {
         use crate::scrapers::dblp::DblpScraper;
         let scraper = DblpScraper::default();
-        assert_eq!(
+        assert!(
             format!("{:?}", scraper).contains("DblpScraper"),
-            true,
             "Should create a DblpScraper via default"
         );
     }
@@ -346,9 +344,8 @@ mod tests {
             enable_cache: true,
         };
         let scraper = DblpScraper::with_config(config);
-        assert_eq!(
+        assert!(
             format!("{:?}", scraper).contains("DblpScraper"),
-            true,
             "Should create a DblpScraper with custom config"
         );
     }
