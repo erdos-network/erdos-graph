@@ -1,13 +1,9 @@
-//! Orchestrates the scraping process across multiple publication sources.
-//!
-//! This module coordinates scraping from ArXiv, DBLP, and zbMATH, managing
-//! checkpointing, chunking large date ranges, and ingesting results into the database.
-
 use crate::config::Config;
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
 use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
+use bloomfilter::Bloom;
 use chrono::{DateTime, Utc};
 use indradb::{
     Database, Datastore, Edge, Identifier, Json, QueryExt, QueryOutputValue, RangeVertexQuery,
@@ -22,33 +18,33 @@ use uuid::Uuid;
 
 use std::time::Instant;
 
-/// Cached publication information for deduplication.
-#[derive(Clone, Debug)]
-struct DeduplicationCandidate {
-    id: Uuid,
-    title: String,
-    // We do not cache authors to save memory; if title matches, we check DB.
-}
-
+/// Helper struct to manage deduplication caching.
 /// Helper struct to manage deduplication caching.
 pub(crate) struct DeduplicationCache {
-    /// Map of year -> list of candidates
-    candidates_by_year: HashMap<u32, Vec<DeduplicationCandidate>>,
+    /// Track which years have been loaded into the Bloom filters
+    loaded_years: HashSet<u32>,
+    /// Global Bloom Filter for Titles
+    title_filter: Bloom<String>,
+    /// Global Bloom Filter for Authors
+    author_filter: Bloom<String>,
 }
 
 impl DeduplicationCache {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(bloom_size: usize) -> Self {
         Self {
-            candidates_by_year: HashMap::new(),
+            loaded_years: HashSet::new(),
+            title_filter: Bloom::new_for_fp_rate(bloom_size, 0.01).unwrap(),
+            author_filter: Bloom::new_for_fp_rate(bloom_size, 0.01).unwrap(),
         }
     }
 
     /// Adds a record to the cache.
-    fn add(&mut self, year: u32, id: Uuid, title: String) {
-        self.candidates_by_year
-            .entry(year)
-            .or_default()
-            .push(DeduplicationCandidate { id, title });
+    fn add(&mut self, _year: u32, _id: Uuid, title: String, authors: &[String]) {
+        self.title_filter.set(&normalize_title(&title));
+
+        for author in authors {
+            self.author_filter.set(&normalize_title(author));
+        }
     }
 
     /// Checks if a record exists in the cache (and populates cache from DB if needed).
@@ -59,28 +55,80 @@ impl DeduplicationCache {
         config: &Config,
     ) -> bool {
         // Ensure cache is populated for this year
-        if !self.candidates_by_year.contains_key(&record.year) {
+        if !self.loaded_years.contains(&record.year) {
             self.populate_year(record.year, datastore);
         }
 
-        let candidates = self.candidates_by_year.get(&record.year).unwrap();
+        let record_title_norm = normalize_title(&record.title);
 
-        let cosine = Cosine::default();
-        let record_title_norm = record.title.to_lowercase();
+        // Global Title Bloom filter check
+        if !self.title_filter.check(&record_title_norm) {
+            return false;
+        }
 
-        for candidate in candidates {
-            let db_title_norm = candidate.title.to_lowercase();
-            let similarity = cosine.for_str(&record_title_norm, &db_title_norm).nval();
+        // Global Author Bloom filter check (if record has authors)
+        if !record.authors.is_empty() {
+            let mut any_author_match = false;
+            for author in &record.authors {
+                if self.author_filter.check(&normalize_title(author)) {
+                    any_author_match = true;
+                    break;
+                }
+            }
+            if !any_author_match {
+                return false;
+            }
+        }
 
-            if similarity >= config.deduplication.title_similarity_threshold {
-                // Title matches, check authors via DB
-                if check_authors_similarity(
-                    &candidate.id,
-                    &record.authors,
-                    datastore,
-                    config.deduplication.author_similarity_threshold,
-                ) {
-                    return true;
+        if let Ok(type_prop) = Identifier::new(crate::db::schema::PUBLICATION_TYPE)
+            && let Ok(year_prop) = Identifier::new("year")
+            && let Ok(title_prop) = Identifier::new("title")
+        {
+            let year_val = Json::new(json!(record.year.to_string()));
+            let q = RangeVertexQuery::new()
+                .t(type_prop)
+                .with_property_equal_to(year_prop, year_val);
+
+            if let Ok(q) = q
+                && let Ok(q_props) = q.properties()
+                && let Ok(results) = datastore.get(q_props)
+                && let Some(QueryOutputValue::VertexProperties(vps)) = results.first()
+            {
+                let cosine = Cosine::default();
+                let record_title_lower = record.title.to_lowercase();
+
+                for vp in vps {
+                    if let Some(val) = vp.props.iter().find(|p| p.name == title_prop)
+                        && let Some(title) = val.value.as_str()
+                    {
+                        // If normalized titles are identical, skip cosine
+                        if record_title_norm == normalize_title(title) {
+                            if check_authors_similarity(
+                                &vp.vertex.id,
+                                &record.authors,
+                                datastore,
+                                config.deduplication.author_similarity_threshold,
+                            ) {
+                                return true;
+                            }
+                            continue;
+                        }
+
+                        let db_title_lower = title.to_lowercase();
+                        let similarity =
+                            cosine.for_str(&record_title_lower, &db_title_lower).nval();
+
+                        if similarity >= config.deduplication.title_similarity_threshold
+                            && check_authors_similarity(
+                                &vp.vertex.id,
+                                &record.authors,
+                                datastore,
+                                config.deduplication.author_similarity_threshold,
+                            )
+                        {
+                            return true;
+                        }
+                    }
                 }
             }
         }
@@ -107,30 +155,81 @@ impl DeduplicationCache {
                 && let Ok(results) = datastore.get(q_props)
                 && let Some(QueryOutputValue::VertexProperties(vps)) = results.first()
             {
-                let mut list = Vec::new();
+                let mut count = 0;
+                let mut pub_ids = Vec::with_capacity(vps.len());
+
                 for vp in vps {
                     if let Some(val) = vp.props.iter().find(|p| p.name == title_prop)
                         && let Some(title) = val.value.as_str()
                     {
-                        list.push(DeduplicationCandidate {
-                            id: vp.vertex.id,
-                            title: title.to_string(),
-                        });
+                        let norm = normalize_title(title);
+                        self.title_filter.set(&norm);
+                        pub_ids.push(vp.vertex.id);
+                        count += 1;
                     }
                 }
+
+                // Batch fetch authors
+                if !pub_ids.is_empty() {
+                    for chunk in pub_ids.chunks(1000) {
+                        let q = SpecificVertexQuery::new(chunk.to_vec());
+                        if let Ok(q_in) = q.inbound()
+                            && let Ok(q_out) = q_in.outbound()
+                            && let Ok(q_props) = q_out.properties()
+                            && let Ok(results) = datastore.get(q_props)
+                            && let Some(QueryOutputValue::VertexProperties(author_vps)) =
+                                results.first()
+                            && let Ok(name_prop) = Identifier::new("name")
+                        {
+                            for avp in author_vps {
+                                if let Some(val) = avp.props.iter().find(|p| p.name == name_prop)
+                                    && let Some(name) = val.value.as_str()
+                                {
+                                    self.author_filter.set(&normalize_title(name));
+                                }
+                            }
+                        }
+                    }
+                }
+
                 logger::info(&format!(
-                    "Populated cache for year {}: {} candidates in {}ms",
+                    "Populated filters for year {}: {} records in {}ms",
                     year,
-                    list.len(),
+                    count,
                     start.elapsed().as_millis()
                 ));
-                self.candidates_by_year.insert(year, list);
-                return;
             }
         }
-        // If failed or empty, insert empty list
-        self.candidates_by_year.insert(year, Vec::new());
+        self.loaded_years.insert(year);
     }
+}
+
+/// Normalizes a title for Bloom filter and comparison.
+/// - Lowercases
+/// - Tokenizes by whitespace
+/// - Removes stop words
+/// - Removes non-alphanumeric characters
+/// - Concatenates
+pub(crate) fn normalize_title(title: &str) -> String {
+    let stop_words: HashSet<&str> = [
+        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is",
+        "it", "its", "of", "on", "that", "the", "to", "was", "were", "will", "with",
+    ]
+    .iter()
+    .cloned()
+    .collect();
+
+    title
+        .to_lowercase()
+        .split_whitespace()
+        .filter(|token| !stop_words.contains(token))
+        .map(|token| {
+            token
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .collect::<String>()
+        })
+        .collect::<String>()
 }
 
 /// Context for ingestion to maintain caches
@@ -141,9 +240,9 @@ pub(crate) struct IngestionContext {
 }
 
 impl IngestionContext {
-    fn new() -> Self {
+    fn new(bloom_size: usize) -> Self {
         Self {
-            dedup_cache: DeduplicationCache::new(),
+            dedup_cache: DeduplicationCache::new(bloom_size),
             author_cache: HashMap::new(),
             edge_cache: HashMap::new(),
         }
@@ -239,7 +338,7 @@ pub async fn run_scrape(
 
     // Consumer loop
     let mut ingested_count = 0;
-    let mut context = IngestionContext::new();
+    let mut context = IngestionContext::new(config.deduplication.bloom_filter_size);
 
     loop {
         if let Some(record) = queue.dequeue() {
@@ -289,9 +388,12 @@ async fn ingest_publication(
     let pub_vertex = add_publication(&record, datastore)?;
 
     // Add to cache
-    context
-        .dedup_cache
-        .add(record.year, pub_vertex.id, record.title.clone());
+    context.dedup_cache.add(
+        record.year,
+        pub_vertex.id,
+        record.title.clone(),
+        &record.authors,
+    );
 
     let mut author_vertices = Vec::new();
 

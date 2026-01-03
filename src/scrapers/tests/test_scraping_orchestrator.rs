@@ -4,7 +4,7 @@ mod tests {
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::scraping_orchestrator::{
         DeduplicationCache, add_publication, create_authored_edge, create_coauthor_edge,
-        get_or_create_author_vertex, publication_exists,
+        get_or_create_author_vertex, normalize_title, publication_exists,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use indradb::{
@@ -629,7 +629,7 @@ mod tests {
     /// Test DeduplicationCache::new
     #[test]
     fn test_deduplication_cache_new() {
-        let _cache = DeduplicationCache::new();
+        let _cache = DeduplicationCache::new(100);
         // Verify it's created without panicking
     }
 
@@ -655,6 +655,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
@@ -671,7 +672,7 @@ mod tests {
             .index_property(Identifier::new("name").unwrap())
             .unwrap(); // For author lookup
 
-        let mut dedup_cache = DeduplicationCache::new();
+        let mut dedup_cache = DeduplicationCache::new(100);
         let mut author_cache = HashMap::new();
 
         // Test Exact ID Match
@@ -779,6 +780,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
@@ -806,7 +808,7 @@ mod tests {
 
         add_publication(&record, &mut database).unwrap();
 
-        let mut dedup_cache = DeduplicationCache::new();
+        let mut dedup_cache = DeduplicationCache::new(100);
 
         // Check if it exists
         let exists = publication_exists(&record, &database, &config, &mut dedup_cache);
@@ -837,6 +839,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
@@ -851,7 +854,7 @@ mod tests {
             source: "test".to_string(),
         };
 
-        let mut dedup_cache = DeduplicationCache::new();
+        let mut dedup_cache = DeduplicationCache::new(100);
 
         // Should return false without crashing
         let exists = publication_exists(&record, &database, &config, &mut dedup_cache);
@@ -1032,6 +1035,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
@@ -1068,7 +1072,7 @@ mod tests {
         add_publication(&record1, &mut database).unwrap();
         add_publication(&record2, &mut database).unwrap();
 
-        let mut dedup_cache = DeduplicationCache::new();
+        let mut dedup_cache = DeduplicationCache::new(100);
 
         // Check for a third paper in the same year - should populate cache with both existing papers
         let record3 = PublicationRecord {
@@ -1106,6 +1110,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
@@ -1132,7 +1137,7 @@ mod tests {
         };
         add_publication(&record1, &mut database).unwrap();
 
-        let mut dedup_cache = DeduplicationCache::new();
+        let mut dedup_cache = DeduplicationCache::new(100);
 
         // Check for a different paper in the same year
         let record2 = PublicationRecord {
@@ -1148,5 +1153,13 @@ mod tests {
 
         // Should not exist
         assert!(!exists);
+    }
+    #[test]
+    fn test_normalize_title() {
+        assert_eq!(normalize_title("The Graph Analysis"), "graphanalysis");
+        assert_eq!(normalize_title("A Study of Trees"), "studytrees"); // stop words: a, of
+        assert_eq!(normalize_title("Complex-Networks!"), "complexnetworks"); // non-alphanumeric
+        assert_eq!(normalize_title("   Spaces   "), "spaces");
+        assert_eq!(normalize_title("The A An And Are"), ""); // all stop words
     }
 }

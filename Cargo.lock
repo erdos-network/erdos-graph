@@ -195,6 +195,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bloomfilter"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f6d7f06817e48ea4e17532fa61bc4e8b9a101437f0623f69d2ea54284f3a817"
+dependencies = [
+ "getrandom 0.2.16",
+ "siphasher",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -552,6 +562,7 @@ name = "erdos-graph"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bloomfilter",
  "bytes",
  "chrono",
  "clap",

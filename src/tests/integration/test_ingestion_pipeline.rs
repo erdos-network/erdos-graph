@@ -56,6 +56,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
@@ -113,6 +114,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
@@ -175,6 +177,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
@@ -234,6 +237,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
@@ -319,6 +323,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
@@ -371,6 +376,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 120,
             polling_interval_ms: 100,
@@ -426,6 +432,7 @@ mod tests {
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
                 author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
             },
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
