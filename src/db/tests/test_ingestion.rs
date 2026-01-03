@@ -2,7 +2,7 @@
 mod tests {
     use crate::db::ingestion::{PublicationRecord, get_checkpoint, set_checkpoint};
     use chrono::Utc;
-    use std::fs;
+    use tempfile::TempDir;
 
     /// Test basic publication record creation.
     #[test]
@@ -25,13 +25,15 @@ mod tests {
     fn test_checkpoint_save_and_load() {
         let source = "test_source";
         let test_date = Utc::now();
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
 
         // Save checkpoint
-        let save_result = set_checkpoint(source, test_date);
+        let save_result = set_checkpoint(source, test_date, base_path);
         assert!(save_result.is_ok());
 
         // Load checkpoint
-        let load_result = get_checkpoint(source);
+        let load_result = get_checkpoint(source, base_path);
         assert!(load_result.is_ok());
 
         let loaded_date = load_result.unwrap();
@@ -40,15 +42,14 @@ mod tests {
         // Dates should match (within a second due to serialization)
         let diff = (loaded_date.unwrap() - test_date).num_seconds().abs();
         assert!(diff < 2);
-
-        // Clean up
-        let _ = fs::remove_file(format!("checkpoints/{}.txt", source));
     }
 
     /// Test checkpoint for non-existent source.
     #[test]
     fn test_checkpoint_nonexistent() {
-        let result = get_checkpoint("nonexistent_source_xyz");
+        let temp_dir = TempDir::new().unwrap();
+        let base_path = temp_dir.path();
+        let result = get_checkpoint("nonexistent_source_xyz", base_path);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }

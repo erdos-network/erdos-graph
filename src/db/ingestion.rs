@@ -3,6 +3,7 @@
 //! This module handles orchestrating the scraping process, including date range calculation,
 //! chunking, and checkpoint management.
 
+use crate::logger;
 use chrono::{DateTime, Duration, Utc};
 use indradb::{Database, Datastore};
 use std::fs;
@@ -37,17 +38,23 @@ pub struct PublicationRecord {
 ///
 /// # Arguments
 /// * `source` - The source identifier ("arxiv", "dblp", or "zbmath")
+/// * `base_path` - The directory where checkpoints are stored
 ///
 /// # Returns
 /// `Some(DateTime)` if a checkpoint exists, `None` if this is the first scrape
-pub fn get_checkpoint(source: &str) -> Result<Option<DateTime<Utc>>, Box<dyn std::error::Error>> {
-    let path = format!("checkpoints/{}.txt", source);
-    if Path::new(&path).exists() {
-        let content = fs::read_to_string(path)?;
+pub fn get_checkpoint(
+    source: &str,
+    base_path: &Path,
+) -> Result<Option<DateTime<Utc>>, Box<dyn std::error::Error>> {
+    let path = base_path.join(format!("{}.txt", source));
+    if path.exists() {
+        let content = fs::read_to_string(&path)?;
+        logger::debug(&format!("Read checkpoint for {}: {}", source, content));
         Ok(Some(
             DateTime::parse_from_rfc3339(&content)?.with_timezone(&Utc),
         ))
     } else {
+        logger::debug(&format!("No checkpoint found for {}", source));
         Ok(None)
     }
 }
@@ -60,9 +67,19 @@ pub fn get_checkpoint(source: &str) -> Result<Option<DateTime<Utc>>, Box<dyn std
 /// # Arguments
 /// * `source` - The source identifier ("arxiv", "dblp", or "zbmath")
 /// * `date` - The timestamp to save as the new checkpoint
-pub fn set_checkpoint(source: &str, date: DateTime<Utc>) -> Result<(), Box<dyn std::error::Error>> {
-    fs::create_dir_all("checkpoints")?;
-    fs::write(format!("checkpoints/{}.txt", source), date.to_rfc3339())?;
+/// * `base_path` - The directory where checkpoints are stored
+pub fn set_checkpoint(
+    source: &str,
+    date: DateTime<Utc>,
+    base_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(base_path)?;
+    fs::write(base_path.join(format!("{}.txt", source)), date.to_rfc3339())?;
+    logger::info(&format!(
+        "Updated checkpoint for {} to {}",
+        source,
+        date.to_rfc3339()
+    ));
     Ok(())
 }
 
@@ -76,45 +93,67 @@ pub fn set_checkpoint(source: &str, date: DateTime<Utc>) -> Result<(), Box<dyn s
 /// # Arguments
 /// * `mode` - Processing mode: "initial" (scrape last 10 years), "weekly" (incremental updates),
 ///   or "full" (scrape everything from beginning)
-/// * `source` - Optional specific source to scrape ("arxiv", "dblp", or "zbmath"), or None for all enabled sources
+/// * `sources` - List of source identifiers to scrape (e.g., ["arxiv", "dblp", "zbmath"])
 /// * `datastore` - Mutable reference to the IndraDB datastore
+/// * `config` - Configuration containing ingestion settings
 ///
 /// # Returns
 /// `Ok(())` on success, or an error if processing fails
 #[coverage(off)]
 pub async fn orchestrate_scraping_and_ingestion(
     mode: &str,
-    source: Option<&str>,
+    sources: Vec<String>,
     datastore: &mut Database<impl Datastore>,
+    config: &crate::config::Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::config::load_config;
     use crate::scrapers::scraping_orchestrator::run_scrape;
 
-    // Load configuration
-    let config = load_config()?;
+    logger::info(&format!(
+        "Orchestrating scraping for sources: {:?} in mode: {}",
+        sources, mode
+    ));
 
-    // Determine which sources to process
-    let sources: Vec<String> = if let Some(src) = source {
-        vec![src.to_string()]
-    } else {
-        config.scrapers.enabled.clone()
-    };
+    let default_checkpoint_dir = "checkpoints".to_string();
+    let checkpoint_dir = config
+        .ingestion
+        .checkpoint_dir
+        .as_ref()
+        .unwrap_or(&default_checkpoint_dir);
+    let checkpoint_path = Path::new(checkpoint_dir);
 
     // Calculate start and end dates based on mode (source-agnostic, uses earliest checkpoint)
-    // Use the sources we're actually processing for checkpoint calculation
-    let (start_date, end_date) = calculate_date_range(mode, &sources, &config.ingestion)?;
+    let (start_date, end_date) =
+        calculate_date_range(mode, &sources, &config.ingestion, checkpoint_path)?;
+
+    logger::info(&format!(
+        "Calculated date range: {} to {}",
+        start_date, end_date
+    ));
 
     // Break date range into chunks
     let chunks = chunk_date_range(start_date, end_date, config.ingestion.chunk_size_days)?;
+    let total_chunks = chunks.len();
+    logger::info(&format!(
+        "Split date range into {} chunks of {} days",
+        total_chunks, config.ingestion.chunk_size_days
+    ));
 
     // Run run_scrape for each chunk (all sources in parallel) and update checkpoints
-    for (chunk_start, chunk_end) in chunks {
+    for (i, (chunk_start, chunk_end)) in chunks.into_iter().enumerate() {
+        logger::info(&format!(
+            "Processing chunk {}/{}: {} to {}",
+            i + 1,
+            total_chunks,
+            chunk_start,
+            chunk_end
+        ));
+
         // Pass sources list to run_scrape
-        run_scrape(chunk_start, chunk_end, sources.clone(), datastore, &config).await?;
+        run_scrape(chunk_start, chunk_end, sources.clone(), datastore, config).await?;
 
         // Update checkpoints for all sources that were processed
         for src in &sources {
-            set_checkpoint(src, chunk_end)?;
+            set_checkpoint(src, chunk_end, checkpoint_path)?;
         }
     }
 
@@ -138,13 +177,14 @@ fn calculate_date_range(
     mode: &str,
     sources: &[String],
     config: &crate::config::IngestionConfig,
+    base_path: &Path,
 ) -> Result<(DateTime<Utc>, DateTime<Utc>), Box<dyn std::error::Error>> {
     let now = Utc::now();
 
     // Find the earliest checkpoint across all sources
     let mut earliest_checkpoint: Option<DateTime<Utc>> = None;
     for source in sources {
-        if let Some(checkpoint) = get_checkpoint(source)? {
+        if let Some(checkpoint) = get_checkpoint(source, base_path)? {
             earliest_checkpoint = match earliest_checkpoint {
                 Some(earliest) => Some(std::cmp::min(earliest, checkpoint)),
                 None => Some(checkpoint),

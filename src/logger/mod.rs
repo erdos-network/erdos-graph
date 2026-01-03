@@ -7,17 +7,18 @@
 //! - `Logger`: trait defining the logging surface
 //! - `LogLevel`: enum of levels
 //! - `NoopLogger`: default no-op implementation
-//! - `StdoutLogger`: simple stdout-backed stub useful during development
+//! - `AsyncLogger`: threaded stdout-backed logger
 //!
 //! TODOs:
 //! - Provide a global logger facade and initialization helper
 //! - Add feature flags to swap between implementations
+//!
 
 #![coverage(off)]
 
 pub mod core;
 
-pub use core::{LogLevel, Logger, NoopLogger, StdoutLogger};
+pub use core::{AsyncLogger, LogLevel, Logger, NoopLogger};
 
 #[cfg(test)]
 pub mod tests;

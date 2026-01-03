@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::config::ArxivSourceConfig;
     use crate::scrapers::arxiv;
     use chrono::{TimeZone, Utc};
     use wiremock::matchers::query_param;
@@ -47,7 +48,7 @@ mod tests {
 
         // Build a test config and point the scraper at the mock server. This
         // avoids mutating process-wide env vars in tests.
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 100,
             channel_size: 2,
@@ -124,7 +125,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 1,
             channel_size: 2,
@@ -168,7 +169,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 100,
             channel_size: 2,
@@ -200,7 +201,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 100,
             channel_size: 2,
@@ -231,7 +232,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 100,
             channel_size: 2,
@@ -276,7 +277,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 100,
             channel_size: 2,
@@ -326,7 +327,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 100,
             channel_size: 2,
@@ -366,7 +367,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let cfg = arxiv::ArxivConfig {
+        let cfg = ArxivSourceConfig {
             base_url: format!("{}/api/query", mock_server.uri()),
             page_size: 100,
             channel_size: 2,
@@ -566,9 +567,9 @@ mod tests {
     // Test: sanity checks for `ArxivConfig::default()` values.
     #[test]
     fn test_arxiv_config_default_values() {
-        use crate::scrapers::arxiv::ArxivConfig;
+        use crate::config::ArxivSourceConfig;
 
-        let cfg = ArxivConfig::default();
+        let cfg = ArxivSourceConfig::default();
         // basic sanity checks
         assert!(cfg.base_url.contains("arxiv") || !cfg.base_url.is_empty());
         assert!(cfg.page_size > 0);

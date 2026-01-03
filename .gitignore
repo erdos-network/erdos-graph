@@ -27,3 +27,5 @@ target
 
 # Logs 
 .dblp_cache/
+checkpoints/
+graph.db/

@@ -1,4 +1,4 @@
-use super::super::logger::{init_logger, log, LogLevel, NoopLogger, StdoutLogger};
+use super::super::logger::{init_logger, log, LogLevel, NoopLogger, AsyncLogger};
 
 #[test]
 fn global_facade_noop_by_default() {
@@ -14,8 +14,8 @@ fn init_sets_global_logger() {
 }
 
 #[test]
-fn stdout_logger_emits_json() {
-    // This test is a smoke check to ensure StdoutLogger formats without panicking.
-    init_logger(StdoutLogger);
+fn async_logger_emits_json() {
+    // This test is a smoke check to ensure AsyncLogger formats without panicking.
+    init_logger(AsyncLogger::new());
     log(LogLevel::Warn, "this is a warning");
 }

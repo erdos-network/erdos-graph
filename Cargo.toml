@@ -23,6 +23,8 @@ crossbeam-channel = "0.5"
 async-trait = "0.1"
 textdistance = "1.1.1"
 tempfile = "3.8"
+tokio-cron-scheduler = "0.15.1"
+clap = { version = "4.5.53", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.8"

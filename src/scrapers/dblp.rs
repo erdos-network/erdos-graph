@@ -29,6 +29,7 @@
 //! ```
 
 use crate::db::ingestion::PublicationRecord;
+use crate::logger;
 use crate::scrapers::scraper::Scraper;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
@@ -41,20 +42,22 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
 
-/// DBLP scraper that implements the Scraper trait.
+use crate::config::DblpSourceConfig;
+
+/// Dblp scraper that implements the Scraper trait.
 ///
 /// This struct wraps the configuration and provides the implementation for the
 /// `Scraper` trait methods.
 #[derive(Clone, Debug)]
 pub struct DblpScraper {
-    config: DblpConfig,
+    config: DblpSourceConfig,
 }
 
 impl DblpScraper {
     /// Create a new DblpScraper with default configuration.
     pub fn new() -> Self {
         Self {
-            config: DblpConfig::default(),
+            config: DblpSourceConfig::default(),
         }
     }
 
@@ -62,8 +65,8 @@ impl DblpScraper {
     ///
     /// # Arguments
     ///
-    /// * `config` - A `DblpConfig` instance containing the desired settings.
-    pub fn with_config(config: DblpConfig) -> Self {
+    /// * `config` - A `DblpSourceConfig` instance containing the desired settings.
+    pub fn with_config(config: DblpSourceConfig) -> Self {
         Self { config }
     }
 }
@@ -85,46 +88,6 @@ impl Scraper for DblpScraper {
         end: DateTime<Utc>,
     ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
         scrape_range_with_config(start, end, self.config.clone()).await
-    }
-}
-
-/// Configuration for the DBLP scraper.
-///
-/// This struct holds configuration parameters that control how the scraper interacts
-/// with the DBLP API, including the base URL, pagination size, and rate limiting.
-///
-/// # Fields
-///
-/// * `base_url`: The base URL for the DBLP Search API. Defaults to `https://dblp.org/search/publ/api`.
-/// * `page_size`: The number of results to request per page. DBLP typically allows up to 1000.
-/// * `delay_ms`: The delay in milliseconds between requests to avoid hitting rate limits.
-///
-/// # Environment Variables
-///
-/// The `Default` implementation looks for the following environment variables:
-/// * `DBLP_BASE_URL`: Overrides the default base URL.
-#[derive(Clone, Debug)]
-pub struct DblpConfig {
-    /// Base URL for the DBLP Search API
-    pub base_url: String,
-    /// Number of hits per page (max 1000 usually)
-    pub page_size: usize,
-    /// Delay between requests in milliseconds
-    pub delay_ms: u64,
-    /// Enable file-based caching (disable for tests)
-    pub enable_cache: bool,
-}
-
-impl Default for DblpConfig {
-    fn default() -> Self {
-        let base_url = std::env::var("DBLP_BASE_URL")
-            .unwrap_or_else(|_| "https://dblp.org/search/publ/api".to_string());
-        Self {
-            base_url,
-            page_size: 1000,
-            delay_ms: 1000, // Be polite
-            enable_cache: true,
-        }
     }
 }
 
@@ -165,30 +128,6 @@ struct DblpHit {
     info: Option<DblpInfo>,
 }
 
-/// detailed information about a publication.
-#[derive(Debug, Deserialize)]
-struct DblpInfo {
-    /// Title of the publication.
-    title: Option<String>,
-    /// Authors of the publication.
-    authors: Option<DblpAuthors>,
-    /// Year of publication (as a string).
-    year: Option<String>,
-    /// Venue or journal name.
-    venue: Option<String>,
-    /// DBLP key for the publication.
-    key: Option<String>,
-    // other fields like type, doi, url exist but we focus on these
-}
-
-/// Container for the list of authors.
-#[derive(Debug, Deserialize)]
-struct DblpAuthors {
-    /// List of authors, which can be simple strings or objects.
-    #[serde(default)]
-    author: Vec<StringOrStruct>,
-}
-
 /// Enum to handle DBLP's inconsistent author formatting.
 ///
 /// Sometimes an author is just a string name, other times it's an object with a `text` field
@@ -198,6 +137,56 @@ struct DblpAuthors {
 enum StringOrStruct {
     String(String),
     Struct { text: String },
+}
+
+/// Enum to handle fields that can be a single string or a list of strings (e.g. venue, title).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StringOrSeq {
+    String(String),
+    Seq(Vec<String>),
+}
+
+/// detailed information about a publication.
+#[derive(Debug, Deserialize)]
+struct DblpInfo {
+    /// Title of the publication.
+    title: Option<StringOrSeq>,
+    /// Authors of the publication.
+    authors: Option<DblpAuthors>,
+    /// Year of publication (as a string).
+    year: Option<String>,
+    /// Venue or journal name.
+    venue: Option<StringOrSeq>,
+    /// DBLP key for the publication.
+    key: Option<String>,
+    // other fields like type, doi, url exist but we focus on these
+}
+
+/// Container for the list of authors.
+#[derive(Debug, Deserialize)]
+struct DblpAuthors {
+    /// List of authors, which can be simple strings or objects, or a single author.
+    /// DBLP returns a single object when there's one author, and an array for multiple.
+    #[serde(default)]
+    author: AuthorField,
+}
+
+/// Enum to handle DBLP's inconsistent author field format.
+///
+/// DBLP returns a single author object for single-author publications,
+/// and an array for multi-author publications.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AuthorField {
+    Single(StringOrStruct),
+    Multiple(Vec<StringOrStruct>),
+}
+
+impl Default for AuthorField {
+    fn default() -> Self {
+        AuthorField::Multiple(Vec::new())
+    }
 }
 
 /// Scrapes DBLP publication data for a specified date range using the Search API.
@@ -219,7 +208,7 @@ pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    scrape_range_with_config(start_date, end_date, DblpConfig::default()).await
+    scrape_range_with_config(start_date, end_date, DblpSourceConfig::default()).await
 }
 
 /// Scrapes DBLP publication data with a custom configuration.
@@ -236,7 +225,7 @@ pub async fn scrape_range(
 ///
 /// * `start_date` - The start of the date range (inclusive).
 /// * `end_date` - The end of the date range (inclusive).
-/// * `config` - The `DblpConfig` to use for the scraper.
+/// * `config` - The `DblpSourceConfig` to use for the scraper.
 ///
 /// # Returns
 ///
@@ -245,7 +234,7 @@ pub async fn scrape_range(
 pub async fn scrape_range_with_config(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    config: DblpConfig,
+    config: DblpSourceConfig,
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
     if start_date >= end_date {
         return Ok(Vec::new());
@@ -255,8 +244,32 @@ pub async fn scrape_range_with_config(
     let end_year = end_date.year();
     let client = Client::new();
     let mut all_records = Vec::new();
+    let current_year = Utc::now().year();
 
     for year in start_year..=end_year {
+        // Optimization: For historic years, only scrape if the range includes the start of the year.
+        // This prevents re-scraping the entire year for every small time chunk (e.g. weekly).
+        // We consider "active" years to be the current and previous year.
+        let is_active_year = year >= current_year - 1;
+
+        if !is_active_year {
+            // Safe to unwrap as 1/1 is always valid
+            let jan1 = chrono::NaiveDate::from_ymd_opt(year, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc();
+
+            // Check if jan1 is within [start_date, end_date)
+            if !(start_date <= jan1 && jan1 < end_date) {
+                logger::debug(&format!(
+                    "Skipping DBLP scrape for historic year {} as range {} to {} does not include Jan 1",
+                    year, start_date, end_date
+                ));
+                continue;
+            }
+        }
+
         let mut first = 0;
         let query = format!("year:{}", year);
 
@@ -266,11 +279,13 @@ pub async fn scrape_range_with_config(
                 config.base_url, query, config.page_size, first
             );
 
+            logger::debug(&format!("Fetching DBLP URL: {}", url));
+
             // Use cached fetch if available
             let body_text = match fetch_url_cached(&client, &url, config.enable_cache).await {
                 Ok(text) => text,
                 Err(e) => {
-                    eprintln!("Failed to fetch URL {}: {}", url, e);
+                    logger::error(&format!("Failed to fetch URL {}: {}", url, e));
                     break;
                 }
             };
@@ -280,7 +295,7 @@ pub async fn scrape_range_with_config(
             let dblp_resp: DblpResponse = match serde_json::from_str(&body_text) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("Failed to parse DBLP JSON: {}", e);
+                    logger::error(&format!("Failed to parse DBLP JSON: {}", e));
                     break;
                 }
             };
@@ -368,7 +383,11 @@ async fn fetch_url_cached(
 ///
 /// Returns `None` if required fields (title, authors) are missing or empty.
 fn convert_hit_to_record(info: DblpInfo) -> Option<PublicationRecord> {
-    let title = info.title?;
+    let title = match info.title? {
+        StringOrSeq::String(s) => s,
+        StringOrSeq::Seq(list) => list.join(" "),
+    };
+
     let year_str = info.year?;
     let year: u32 = year_str.parse().ok()?;
     let key = info.key.unwrap_or_else(|| "unknown".to_string());
@@ -376,7 +395,11 @@ fn convert_hit_to_record(info: DblpInfo) -> Option<PublicationRecord> {
     // Extract authors
     let mut authors = Vec::new();
     if let Some(auths) = info.authors {
-        for a in auths.author {
+        let author_list = match auths.author {
+            AuthorField::Single(a) => vec![a],
+            AuthorField::Multiple(list) => list,
+        };
+        for a in author_list {
             let name = match a {
                 StringOrStruct::String(s) => s,
                 StringOrStruct::Struct { text } => text,
@@ -390,12 +413,17 @@ fn convert_hit_to_record(info: DblpInfo) -> Option<PublicationRecord> {
         return None;
     }
 
+    let venue = info.venue.map(|v| match v {
+        StringOrSeq::String(s) => s,
+        StringOrSeq::Seq(list) => list.join(", "),
+    });
+
     Some(PublicationRecord {
         id: key,
         title,
         authors,
         year,
-        venue: info.venue,
+        venue,
         source: "dblp".to_string(),
     })
 }

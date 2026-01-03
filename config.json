@@ -1,11 +1,23 @@
 {
     "scrapers": {
         "enabled": [
-            "dblp"
-        ]
+            "dblp",
+            "arxiv"
+        ],
+        "dblp": {
+            "base_url": "https://dblp.org/search/publ/api",
+            "page_size": 1000,
+            "delay_ms": 200
+        },
+        "arxiv": {
+            "base_url": "https://export.arxiv.org/api/query",
+            "page_size": 1000,
+            "channel_size": 8,
+            "delay_ms": 200
+        }
     },
     "ingestion": {
-        "chunk_size_days": 1,
+        "chunk_size_days": 7,
         "initial_start_date": "1930-01-01T00:00:00Z",
         "weekly_days": 7
     },
