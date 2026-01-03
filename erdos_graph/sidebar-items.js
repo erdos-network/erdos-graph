@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["config","db","logger","scrapers","utilities"]};
+window.SIDEBAR_ITEMS = {"mod":["config","db","logger","schedulers","scrapers","utilities"]};
