@@ -349,6 +349,76 @@ impl IngestionContext {
         }
         Ok(())
     }
+
+    /// Pre-fetches existing edges between authors to warm the cache.
+    /// This reduces DB reads from O(N^2) to O(1) per publication.
+    fn prefetch_coauthor_edges(
+        &mut self,
+        authors: &[Vertex],
+        datastore: &Database<impl Datastore>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::db::schema::COAUTHORED_WITH_TYPE;
+        use std::collections::HashSet;
+
+        if authors.len() < 2 {
+            return Ok(());
+        }
+
+        let author_ids: Vec<Uuid> = authors.iter().map(|a| a.id).collect();
+        let author_id_set: HashSet<Uuid> = author_ids.iter().cloned().collect();
+        let edge_type = Identifier::new(COAUTHORED_WITH_TYPE)?;
+
+        // 1. Get all outbound edges of type COAUTHORED_WITH from these authors
+        let q = SpecificVertexQuery::new(author_ids)
+            .outbound()?
+            .t(edge_type);
+        let results = datastore.get(q)?;
+
+        let mut relevant_edges = Vec::new();
+
+        if let Some(QueryOutputValue::Edges(edges)) = results.first() {
+            for edge in edges {
+                // Only cache edges that are internal to this group of authors
+                if author_id_set.contains(&edge.inbound_id) {
+                    relevant_edges.push(edge.clone());
+                }
+            }
+        }
+
+        if relevant_edges.is_empty() {
+            return Ok(());
+        }
+
+        // 2. Fetch properties (weight) for these edges
+        let weight_prop = Identifier::new("weight")?;
+        let q_props = SpecificEdgeQuery::new(relevant_edges.clone())
+            .properties()?
+            .name(weight_prop);
+        let prop_results = datastore.get(q_props)?;
+
+        if let Some(QueryOutputValue::EdgeProperties(props_list)) = prop_results.first() {
+            for (i, edge_props) in props_list.iter().enumerate() {
+                if let Some(edge) = relevant_edges.get(i) {
+                    let weight = edge_props
+                        .props
+                        .first()
+                        .and_then(|p| {
+                            p.value.as_u64().or_else(|| {
+                                serde_json::from_value::<String>(p.value.deref().clone())
+                                    .ok()
+                                    .and_then(|s| s.parse::<u64>().ok())
+                            })
+                        })
+                        .unwrap_or(1);
+
+                    self.edge_cache
+                        .insert((edge.outbound_id, edge.inbound_id), weight);
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Orchestrates the complete scraping process for one or more publication sources.
@@ -540,6 +610,13 @@ async fn ingest_publication(
         author_vertices.push(author_vertex);
     }
     let added_authors = Instant::now();
+
+    // Pre-fetch existing edges to avoid O(N^2) DB reads
+    if !author_vertices.is_empty() {
+        if let Err(e) = context.prefetch_coauthor_edges(&author_vertices, datastore) {
+            logger::error(&format!("Failed to prefetch co-author edges: {}", e));
+        }
+    }
 
     // Create COAUTHORED_WITH edges between authors
     for i in 0..author_vertices.len() {
