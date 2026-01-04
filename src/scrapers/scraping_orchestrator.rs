@@ -285,6 +285,17 @@ pub(crate) fn normalize_title(title: &str) -> String {
         .collect::<String>()
 }
 
+/// Normalizes an author name for cache and deduplication.
+/// - Lowercases
+/// - Splits by whitespace and rejoins with single space
+pub(crate) fn normalize_author(name: &str) -> String {
+    name.trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Context for ingestion to maintain caches
 pub(crate) struct IngestionContext {
     pub dedup_cache: DeduplicationCache,
@@ -299,6 +310,44 @@ impl IngestionContext {
             author_cache: HashMap::new(),
             edge_cache: HashMap::new(),
         }
+    }
+
+    /// Preloads all author vertices into the cache
+    fn preload_authors(
+        &mut self,
+        datastore: &Database<impl Datastore>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let start = Instant::now();
+        logger::info("Preloading authors...");
+
+        if let Ok(person_type) = Identifier::new(crate::db::schema::PERSON_TYPE)
+            && let Ok(name_prop) = Identifier::new("name")
+        {
+            let q = RangeVertexQuery::new().t(person_type);
+
+            if let Ok(q_props) = q.properties()
+                && let Ok(results) = datastore.get(q_props)
+                && let Some(QueryOutputValue::VertexProperties(vps)) = results.first()
+            {
+                let count = vps.len();
+                for vp in vps {
+                    for p in &vp.props {
+                        if p.name == name_prop {
+                            if let Some(name) = p.value.as_str() {
+                                let norm_name = normalize_author(name);
+                                self.author_cache.insert(norm_name, vp.vertex.clone());
+                            }
+                        }
+                    }
+                }
+                logger::info(&format!(
+                    "Preloaded {} authors in {}ms",
+                    count,
+                    start.elapsed().as_millis()
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -392,6 +441,12 @@ pub async fn run_scrape(
     // Consumer loop
     let mut ingested_count = 0;
     let mut context = IngestionContext::new(config.deduplication.bloom_filter_size);
+
+    // Preload authors to speed up ingestion
+    if let Err(e) = context.preload_authors(datastore) {
+        logger::error(&format!("Failed to preload authors: {}", e));
+    }
+
     let loop_start_time = Instant::now();
     let mut last_log_time = Instant::now();
     let mut last_log_count = 0;
@@ -674,7 +729,8 @@ pub(crate) fn get_or_create_author_vertex(
 ) -> Result<Vertex, Box<dyn std::error::Error>> {
     use crate::db::schema::PERSON_TYPE;
 
-    if let Some(vertex) = author_cache.get(author_name) {
+    let norm_name = normalize_author(author_name);
+    if let Some(vertex) = author_cache.get(&norm_name) {
         return Ok(vertex.clone());
     }
 
@@ -693,7 +749,7 @@ pub(crate) fn get_or_create_author_vertex(
     if let Some(QueryOutputValue::Vertices(vertices)) = results.first()
         && let Some(vertex) = vertices.first()
     {
-        author_cache.insert(author_name.to_string(), vertex.clone());
+        author_cache.insert(norm_name, vertex.clone());
         return Ok(vertex.clone());
     }
 
@@ -717,7 +773,7 @@ pub(crate) fn get_or_create_author_vertex(
         datastore.set_properties(q, prop_name, &json_val)?;
     }
 
-    author_cache.insert(author_name.to_string(), vertex.clone());
+    author_cache.insert(norm_name, vertex.clone());
     Ok(vertex)
 }
 
