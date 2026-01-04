@@ -1,4 +1,5 @@
 use crate::db::ingestion::PublicationRecord;
+use crate::utilities::thread_safe_queue::QueueProducer;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -9,5 +10,6 @@ pub trait Scraper: Send + Sync {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>>;
+        producer: QueueProducer<PublicationRecord>,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }

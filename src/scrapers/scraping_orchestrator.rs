@@ -482,22 +482,9 @@ pub async fn run_scrape(
             };
 
             logger::info(&format!("{} scraper started", src_name));
-            match scraper.scrape_range(start, end).await {
-                Ok(records) => {
-                    let count = records.len();
-                    logger::info(&format!(
-                        "{} scraper finished, found {} records",
-                        src_name, count
-                    ));
-                    for record in records {
-                        if let Err(e) = producer.submit(record) {
-                            logger::error(&format!(
-                                "Failed to submit record from {}: {}",
-                                src_name, e
-                            ));
-                        }
-                    }
-                    logger::info(&format!("{} scraper finished submitting records", src_name));
+            match scraper.scrape_range(start, end, producer).await {
+                Ok(()) => {
+                    logger::info(&format!("{} scraper finished", src_name));
                 }
                 Err(e) => {
                     logger::error(&format!("Scraping failed for {}: {}", src_name, e));

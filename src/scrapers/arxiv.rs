@@ -1,6 +1,7 @@
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use crate::scrapers::scraper::Scraper;
+use crate::utilities::thread_safe_queue::{QueueConfig, QueueProducer, ThreadSafeQueue};
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
 use quick_xml::Reader;
@@ -44,8 +45,9 @@ impl Scraper for ArxivScraper {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-        scrape_range_with_config_async(start, end, self.config.clone()).await
+        producer: QueueProducer<PublicationRecord>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        scrape_range_with_config_async(start, end, self.config.clone(), producer).await
     }
 }
 
@@ -105,7 +107,8 @@ fn extract_complete_entries(
     buf_acc: &mut Vec<u8>,
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    results: &mut Vec<PublicationRecord>,
+    producer: &QueueProducer<PublicationRecord>,
+    count: &mut usize,
 ) {
     loop {
         let start_opt = find_subslice(buf_acc, b"<entry");
@@ -120,7 +123,10 @@ fn extract_complete_entries(
             let entry_str = String::from_utf8_lossy(entry_slice);
 
             if let Some(rec) = parse_entry_str(&entry_str, start_date, end_date) {
-                results.push(rec);
+                if let Err(e) = producer.submit(rec) {
+                    logger::error(&format!("Failed to submit record: {}", e));
+                }
+                *count += 1;
             }
 
             buf_acc.drain(0..end);
@@ -286,10 +292,20 @@ pub(crate) fn parse_entries_from_chunks(
     let mut results = Vec::new();
     let mut buf_acc: Vec<u8> = Vec::new();
 
+    let queue = ThreadSafeQueue::new(QueueConfig::default());
+    let producer = queue.create_producer();
+
+    let mut count = 0;
     for chunk in chunks {
         buf_acc.extend_from_slice(chunk);
         // Extract any complete entries from the accumulated buffer.
-        extract_complete_entries(&mut buf_acc, start_date, end_date, &mut results);
+        extract_complete_entries(&mut buf_acc, start_date, end_date, &producer, &mut count);
+    }
+
+    // Drain queue
+    drop(producer);
+    while let Some(r) = queue.dequeue() {
+        results.push(r);
     }
 
     results
@@ -322,9 +338,10 @@ pub(crate) fn parse_entries_from_chunks(
 pub async fn scrape_range_async(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let cfg = ArxivSourceConfig::default();
-    scrape_range_with_config_async(start_date, end_date, cfg).await
+    scrape_range_with_config_async(start_date, end_date, cfg, producer).await
 }
 
 /// Asynchronously scrape publication records using an explicit configuration.
@@ -345,7 +362,8 @@ pub async fn scrape_range_with_config_async(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     cfg: ArxivSourceConfig,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
     let mut start: usize = 0;
     let page_size: usize = cfg.page_size;
@@ -353,10 +371,10 @@ pub async fn scrape_range_with_config_async(
     let delay_ms: u64 = cfg.delay_ms;
 
     if start_date > end_date {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
-    let mut results: Vec<PublicationRecord> = Vec::new();
+    // let mut results: Vec<PublicationRecord> = Vec::new();
 
     loop {
         // Format dates as YYYYMMDDHHMM
@@ -374,7 +392,8 @@ pub async fn scrape_range_with_config_async(
         let mut resp = client.get(&url).send().await?;
         // Remember how many results we had before this page so we can decide
         // when to stop (arXiv returns fewer than page_size when exhausted)
-        let prev_results_len = results.len();
+        // Remember how many results we processed in this page
+        let mut page_record_count = 0;
         let mut buf_acc: Vec<u8> = Vec::new();
 
         loop {
@@ -384,26 +403,45 @@ pub async fn scrape_range_with_config_async(
             }
 
             // Extract complete entries
-            extract_complete_entries(&mut buf_acc, start_date, end_date, &mut results);
+            // Extract complete entries
+            extract_complete_entries(
+                &mut buf_acc,
+                start_date,
+                end_date,
+                &producer,
+                &mut page_record_count,
+            );
         }
 
         // Process any remaining complete entries after EOF
-        extract_complete_entries(&mut buf_acc, start_date, end_date, &mut results);
+        // Process any remaining complete entries after EOF
+        extract_complete_entries(
+            &mut buf_acc,
+            start_date,
+            end_date,
+            &producer,
+            &mut page_record_count,
+        );
 
         // Be polite to arXiv: small delay between paged requests
         sleep(Duration::from_millis(delay_ms)).await;
 
         // If fewer entries were added than page_size, we've reached the end
-        let added = results.len() - prev_results_len;
-        logger::debug(&format!("Parsed {} records from this page", added));
-        if added < page_size {
+        drop(resp); // Close response to free resources
+
+        // If fewer entries were added than page_size, we've reached the end
+        logger::debug(&format!(
+            "Parsed {} records from this page",
+            page_record_count
+        ));
+        if page_record_count < page_size {
             break;
         }
 
         start += page_size;
     }
 
-    Ok(results)
+    Ok(())
 }
 
 /// Blocking wrapper around the async scraper.
@@ -418,7 +456,20 @@ pub fn scrape_range(
 ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
     // Create a small runtime to run the async function synchronously.
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(scrape_range_async(start_date, end_date))
+    let queue = ThreadSafeQueue::new(QueueConfig::default());
+    let producer = queue.create_producer();
+
+    // We run the async function synchronously using the runtime.
+    // We use an async block to move the producer into the future.
+    rt.block_on(async move { scrape_range_async(start_date, end_date, producer).await })?;
+
+    let mut results = Vec::new();
+
+    while let Some(record) = queue.dequeue() {
+        results.push(record);
+    }
+
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -452,16 +503,21 @@ mod helper_tests {
 
         // After first chunk there is no complete entry
         buf_acc.extend_from_slice(&pre);
-        extract_complete_entries(&mut buf_acc, start, end, &mut results);
-        assert!(
-            results.is_empty(),
-            "no complete entries should be parsed yet"
-        );
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        let mut count = 0;
+
+        extract_complete_entries(&mut buf_acc, start, end, &producer, &mut count);
+        assert_eq!(count, 0, "no complete entries should be parsed yet");
+        assert!(queue.dequeue().is_none());
 
         // After second chunk the entry should be parsed and removed from buffer
         buf_acc.extend_from_slice(&post);
-        extract_complete_entries(&mut buf_acc, start, end, &mut results);
-        assert_eq!(results.len(), 1);
+        extract_complete_entries(&mut buf_acc, start, end, &producer, &mut count);
+        assert_eq!(count, 1);
+
+        let rec = queue.dequeue().unwrap();
+        results.push(rec);
         let r = &results[0];
         assert_eq!(r.id, "s1");
         assert_eq!(r.title, "Small");
@@ -480,8 +536,16 @@ mod helper_tests {
 
         let mut buf_acc = combined.clone();
         let mut results: Vec<PublicationRecord> = Vec::new();
-        extract_complete_entries(&mut buf_acc, start, end, &mut results);
-        assert_eq!(results.len(), 2);
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        let mut count = 0;
+
+        extract_complete_entries(&mut buf_acc, start, end, &producer, &mut count);
+        assert_eq!(count, 2);
+
+        while let Some(r) = queue.dequeue() {
+            results.push(r);
+        }
         let ids: Vec<_> = results.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"a"));
         assert!(ids.contains(&"b"));

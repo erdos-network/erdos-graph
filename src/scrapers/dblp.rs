@@ -31,6 +31,7 @@
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use crate::scrapers::scraper::Scraper;
+use crate::utilities::thread_safe_queue::QueueProducer;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
 use reqwest::Client;
@@ -86,8 +87,9 @@ impl Scraper for DblpScraper {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-        scrape_range_with_config(start, end, self.config.clone()).await
+        producer: QueueProducer<PublicationRecord>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        scrape_range_with_config(start, end, self.config.clone(), producer).await
     }
 }
 
@@ -207,8 +209,9 @@ impl Default for AuthorField {
 pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    scrape_range_with_config(start_date, end_date, DblpSourceConfig::default()).await
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    scrape_range_with_config(start_date, end_date, DblpSourceConfig::default(), producer).await
 }
 
 /// Scrapes DBLP publication data with a custom configuration.
@@ -235,15 +238,16 @@ pub async fn scrape_range_with_config(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     config: DblpSourceConfig,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
     if start_date >= end_date {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
     let start_year = start_date.year();
     let end_year = end_date.year();
     let client = Client::new();
-    let mut all_records = Vec::new();
+    // let mut all_records = Vec::new();
     let current_year = Utc::now().year();
 
     for year in start_year..=end_year {
@@ -311,7 +315,9 @@ pub async fn scrape_range_with_config(
             // Process hits
             for hit in hits {
                 if let Some(record) = hit.info.and_then(convert_hit_to_record) {
-                    all_records.push(record);
+                    if let Err(e) = producer.submit(record) {
+                        logger::error(&format!("Failed to submit record: {}", e));
+                    }
                 }
             }
 
@@ -326,7 +332,7 @@ pub async fn scrape_range_with_config(
         }
     }
 
-    Ok(all_records)
+    Ok(())
 }
 
 /// Helper function to fetch URL with file-based caching.

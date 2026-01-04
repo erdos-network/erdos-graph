@@ -1,6 +1,7 @@
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use crate::scrapers::scraper::Scraper;
+use crate::utilities::thread_safe_queue::QueueProducer;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -41,8 +42,9 @@ impl Scraper for ZbmathScraper {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-        scrape_range_with_config(start, end, self.config.clone()).await
+        producer: QueueProducer<PublicationRecord>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        scrape_range_with_config(start, end, self.config.clone(), producer).await
     }
 }
 
@@ -176,8 +178,9 @@ pub(crate) struct OaiError {
 pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    scrape_range_with_config(start_date, end_date, ZbmathConfig::default()).await
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    scrape_range_with_config(start_date, end_date, ZbmathConfig::default(), producer).await
 }
 
 /// Scrapes publication records from zbMATH with custom configuration.
@@ -185,9 +188,10 @@ pub async fn scrape_range_with_config(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     config: ZbmathConfig,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
-    scrape_chunk_with_config(&client, start_date, end_date, &config).await
+    scrape_chunk_with_config(&client, start_date, end_date, &config, producer).await
 }
 
 /// Scrapes a date range with custom configuration.
@@ -199,8 +203,9 @@ pub async fn scrape_chunk_with_config(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     config: &ZbmathConfig,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    let mut all_records = Vec::new();
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // let mut all_records = Vec::new();
     let mut resumption_token: Option<String> = None;
 
     loop {
@@ -283,7 +288,9 @@ pub async fn scrape_chunk_with_config(
             // Convert OAI-PMH records to PublicationRecord
             for record in list_records.records {
                 if let Some(publication) = convert_to_publication_record(record)? {
-                    all_records.push(publication);
+                    if let Err(e) = producer.submit(publication) {
+                        logger::error(&format!("Failed to submit record: {}", e));
+                    }
                 }
             }
 
@@ -302,7 +309,7 @@ pub async fn scrape_chunk_with_config(
         }
     }
 
-    Ok(all_records)
+    Ok(())
 }
 
 /// Converts an OAI-PMH record to a PublicationRecord.

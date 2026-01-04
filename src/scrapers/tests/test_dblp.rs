@@ -3,6 +3,7 @@ mod tests {
     use crate::config::DblpSourceConfig;
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::dblp;
+    use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue}; // Added imports
     use chrono::{TimeZone, Utc};
     use mockito::Server;
     use serde_json::json;
@@ -33,7 +34,15 @@ mod tests {
             delay_ms: 0, // No delay for tests
             enable_cache: false,
         };
-        dblp::scrape_range_with_config(start, end, config).await
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        dblp::scrape_range_with_config(start, end, config, producer).await?;
+
+        let mut results = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            results.push(r);
+        }
+        Ok(results)
     }
 
     #[tokio::test]
@@ -275,10 +284,15 @@ mod tests {
         let end = Utc.with_ymd_and_hms(2020, 3, 1, 0, 0, 0).unwrap();
 
         // If the optimization works, NO request should be made to the server.
-        let result = dblp::scrape_range_with_config(start, end, config).await;
-
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        let result = dblp::scrape_range_with_config(start, end, config, producer).await;
+        // Drain queue just in case (though expect empty)
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
         assert!(result.is_ok());
-        let records = result.unwrap();
         assert_eq!(records.len(), 0);
     }
 
@@ -307,7 +321,9 @@ mod tests {
             .create_async()
             .await;
 
-        let result = dblp::scrape_range_with_config(start, end, config).await;
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        let result = dblp::scrape_range_with_config(start, end, config, producer).await;
 
         assert!(result.is_ok());
         _m2020.assert();
@@ -387,9 +403,16 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
 
-        let result = scraper.scrape_range(start, end).await;
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        let result = scraper.scrape_range(start, end, producer).await;
+
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
         assert!(result.is_ok());
-        let records = result.unwrap();
+        // let records = result.unwrap(); // Removed shadowing
         assert_eq!(records.len(), 1);
     }
 
@@ -427,9 +450,16 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2022, 1, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2022, 12, 31, 23, 59, 59).unwrap();
 
-        let result = dblp::scrape_range_with_config(start, end, config).await;
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        let result = dblp::scrape_range_with_config(start, end, config, producer).await;
+
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
         assert!(result.is_ok());
-        let records = result.unwrap();
+        // let records = result.unwrap(); // Removed shadowing
         assert_eq!(records.len(), 1);
     }
 
@@ -565,14 +595,28 @@ mod tests {
         let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
 
         // First call - should hit server
-        let result1 = dblp::scrape_range_with_config(start, end, config.clone()).await;
+        let queue1 = ThreadSafeQueue::new(QueueConfig::default());
+        let producer1 = queue1.create_producer();
+        let result1 = dblp::scrape_range_with_config(start, end, config.clone(), producer1).await;
         assert!(result1.is_ok());
-        assert_eq!(result1.unwrap().len(), 1);
+
+        let mut recs1 = Vec::new();
+        while let Some(r) = queue1.dequeue() {
+            recs1.push(r);
+        }
+        assert_eq!(recs1.len(), 1);
 
         // Second call - should use cache
-        let result2 = dblp::scrape_range_with_config(start, end, config).await;
+        let queue2 = ThreadSafeQueue::new(QueueConfig::default());
+        let producer2 = queue2.create_producer();
+        let result2 = dblp::scrape_range_with_config(start, end, config, producer2).await;
         assert!(result2.is_ok());
-        assert_eq!(result2.unwrap().len(), 1);
+
+        let mut recs2 = Vec::new();
+        while let Some(r) = queue2.dequeue() {
+            recs2.push(r);
+        }
+        assert_eq!(recs2.len(), 1);
 
         // Verify cache directory was created
         assert!(cache_dir.exists());
