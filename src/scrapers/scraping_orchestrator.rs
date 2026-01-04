@@ -813,24 +813,11 @@ pub(crate) fn get_or_create_author_vertex(
 
     let person_type = Identifier::new(PERSON_TYPE)?;
 
-    // Check if author exists by looking up name property
-    let name_prop = Identifier::new("name")?;
-    let name_val = Json::new(json!(author_name));
+    // TRUST THE CACHE:
+    // Since we preload ALL authors at startup, if it's not in the cache,
+    // it definitely doesn't exist in the DB. Skip the expensive Read check.
 
-    let q = RangeVertexQuery::new()
-        .t(person_type)
-        .with_property_equal_to(name_prop, name_val.clone())?;
-
-    let results = datastore.get(q)?;
-
-    if let Some(QueryOutputValue::Vertices(vertices)) = results.first()
-        && let Some(vertex) = vertices.first()
-    {
-        author_cache.insert(norm_name, vertex.clone());
-        return Ok(vertex.clone());
-    }
-
-    // If not found, create new vertex
+    // Create new vertex
     let vertex = Vertex::new(person_type);
     datastore.create_vertex(&vertex)?;
 
