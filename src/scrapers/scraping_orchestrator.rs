@@ -12,6 +12,7 @@ use indradb::{
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
+use std::time::Duration as StdDuration; // Added for timeout logic
 use textdistance::Algorithm;
 use textdistance::Cosine;
 use uuid::Uuid;
@@ -304,7 +305,7 @@ pub(crate) struct IngestionContext {
 }
 
 impl IngestionContext {
-    fn new(bloom_size: usize) -> Self {
+    pub(crate) fn new(bloom_size: usize) -> Self {
         Self {
             dedup_cache: DeduplicationCache::new(bloom_size),
             author_cache: HashMap::new(),
@@ -508,15 +509,36 @@ pub async fn run_scrape(
     let mut last_log_time = Instant::now();
     let mut last_log_count = 0;
 
-    loop {
-        if let Some(record) = queue.dequeue() {
-            // Ingest publication into db
-            if let Err(e) = ingest_publication(record, datastore, config, &mut context).await {
-                logger::error(&format!("Failed to ingest publication: {}", e));
-            }
-            ingested_count += 1;
+    // Batching configuration
+    const BATCH_SIZE: usize = 100;
+    const BATCH_TIMEOUT: StdDuration = StdDuration::from_millis(200);
+    let mut batch: Vec<PublicationRecord> = Vec::with_capacity(BATCH_SIZE);
+    let mut last_batch_flush = Instant::now();
 
-            if ingested_count % 100 == 0 {
+    loop {
+        // Attempt to dequeue
+        let record_opt = queue.dequeue();
+        let is_none = record_opt.is_none();
+
+        if let Some(record) = record_opt {
+            batch.push(record);
+        }
+
+        let should_flush = batch.len() >= BATCH_SIZE
+            || (!batch.is_empty() && last_batch_flush.elapsed() >= BATCH_TIMEOUT)
+            || (is_none && queue.producers_finished() && !batch.is_empty());
+
+        if should_flush {
+            let batch_len = batch.len();
+            if let Err(e) =
+                ingest_batch(batch.drain(..).collect(), datastore, config, &mut context).await
+            {
+                logger::error(&format!("Failed to ingest batch: {}", e));
+            }
+            ingested_count += batch_len;
+            last_batch_flush = Instant::now();
+
+            if ingested_count - last_log_count >= 100 {
                 let now = Instant::now();
                 let elapsed = now.duration_since(last_log_time).as_secs_f64();
                 let total_elapsed = now.duration_since(loop_start_time).as_secs_f64();
@@ -532,15 +554,16 @@ pub async fn run_scrape(
                 last_log_time = now;
                 last_log_count = ingested_count;
             }
-        } else {
-            if queue.producers_finished() {
+        }
+
+        if is_none {
+            if queue.producers_finished() && batch.is_empty() {
                 break;
             }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(
-                config.polling_interval_ms,
-            ))
-            .await;
+            // Sleep only if we didn't just flush (to avoid busy loop during batch accumulation if queue is slow)
+            if !should_flush {
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await; // Reduced sleep for responsiveness
+            }
         }
     }
 
@@ -554,78 +577,115 @@ pub async fn run_scrape(
     Ok(())
 }
 
-/// Ingests a single publication record into the database.
-async fn ingest_publication(
-    record: PublicationRecord,
+/// Ingests a batch of publication records into the database.
+pub(crate) async fn ingest_batch(
+    records: Vec<PublicationRecord>,
     datastore: &mut Database<impl Datastore>,
     config: &Config,
     context: &mut IngestionContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
-    let title = record.title.clone(); // Clone for logging
-
-    // Check if record already exists in the database
-    if publication_exists(&record, datastore, config, &mut context.dedup_cache) {
-        logger::debug(&format!(
-            "Skipped duplicate '{}' - total check time {}ms",
-            title,
-            start.elapsed().as_millis()
-        ));
+    let records_len = records.len();
+    if records.is_empty() {
         return Ok(());
     }
 
-    // Add publication vertex to database
-    let pub_vertex = add_publication(&record, datastore)?;
-    let added_pub = Instant::now();
+    // 1. Deduplication
+    let mut new_records = Vec::with_capacity(records.len());
+    let mut batch_seen_ids = HashSet::new();
 
-    // Add to cache
-    context.dedup_cache.add(
-        record.year,
-        pub_vertex.id,
-        record.title.clone(),
-        &record.authors,
-        record.id.clone(),
-    );
+    for record in records {
+        // Check if we've already seen this ID in the current batch
+        if batch_seen_ids.contains(&record.id) {
+            continue;
+        }
 
-    let mut author_vertices = Vec::new();
-
-    // Add new author vertices and create AUTHORED edges
-    for author in &record.authors {
-        let author_vertex =
-            get_or_create_author_vertex(author, datastore, &mut context.author_cache)?;
-        create_authored_edge(&author_vertex, &pub_vertex, datastore)?;
-        author_vertices.push(author_vertex);
-    }
-    let added_authors = Instant::now();
-
-    // Pre-fetch existing edges to avoid O(N^2) DB reads
-    if !author_vertices.is_empty() {
-        if let Err(e) = context.prefetch_coauthor_edges(&author_vertices, datastore) {
-            logger::error(&format!("Failed to prefetch co-author edges: {}", e));
+        if !publication_exists(&record, datastore, config, &mut context.dedup_cache) {
+            new_records.push(record.clone());
+            batch_seen_ids.insert(record.id.clone());
         }
     }
 
-    // Create COAUTHORED_WITH edges between authors
-    for i in 0..author_vertices.len() {
-        for j in (i + 1)..author_vertices.len() {
-            let author1 = &author_vertices[i];
-            let author2 = &author_vertices[j];
+    if new_records.is_empty() {
+        return Ok(());
+    }
 
-            // Create COAUTHORED_WITH edge between record.authors[i] and record.authors[j]
-            create_coauthor_edge(author1, author2, datastore, &mut context.edge_cache)?;
-            // Also create reverse edge for undirected graph simulation
-            create_coauthor_edge(author2, author1, datastore, &mut context.edge_cache)?;
+    // 2. Author Resolution & Creation
+    let mut batch_authors = HashSet::new();
+    for record in &new_records {
+        for author in &record.authors {
+            batch_authors.insert(author.clone());
         }
     }
-    let added_edges = Instant::now();
+
+    // Ensure all authors exist
+    // Note: get_or_create_author_vertex checks cache first.
+    // We can optimize this further by batch checking, but get_or_create is reasonably fast with cache.
+    // Ideally we would filter for unknown authors and bulk create, but existing helper is singular.
+    // For now, we iterate, but since cache is preloaded/warm, it should be fast.
+    for author in &batch_authors {
+        get_or_create_author_vertex(author, datastore, &mut context.author_cache)?;
+    }
+
+    // Collection of author vertices for each record to avoid re-lookup
+    let mut record_author_vertices: Vec<Vec<Vertex>> = Vec::with_capacity(new_records.len());
+    let mut all_involved_authors: HashSet<Uuid> = HashSet::new();
+
+    // 3. Publication Creation
+    for record in &new_records {
+        let pub_vertex = add_publication(record, datastore)?;
+        context.dedup_cache.add(
+            record.year,
+            pub_vertex.id,
+            record.title.clone(),
+            &record.authors,
+            record.id.clone(),
+        );
+
+        let mut authors_for_rec = Vec::new();
+        for author_name in &record.authors {
+            let norm = normalize_author(author_name);
+            if let Some(v) = context.author_cache.get(&norm) {
+                authors_for_rec.push(v.clone());
+                all_involved_authors.insert(v.id);
+                create_authored_edge(v, &pub_vertex, datastore)?;
+            }
+        }
+        record_author_vertices.push(authors_for_rec);
+    }
+
+    // 4. Edge Prefetching & Creation
+    // We collect all unique authors involved in this batch to prefetch edges between them.
+    // Convert back to Vec<Vertex> for prefetch
+    let unique_author_vertices: Vec<Vertex> = context
+        .author_cache
+        .values()
+        .filter(|v| all_involved_authors.contains(&v.id))
+        .cloned()
+        .collect();
+
+    if !unique_author_vertices.is_empty() {
+        if let Err(e) = context.prefetch_coauthor_edges(&unique_author_vertices, datastore) {
+            logger::error(&format!("Failed to prefetch batch co-author edges: {}", e));
+        }
+    }
+
+    // Create co-author edges
+    for authors in record_author_vertices {
+        for i in 0..authors.len() {
+            for j in (i + 1)..authors.len() {
+                let author1 = &authors[i];
+                let author2 = &authors[j];
+                create_coauthor_edge(author1, author2, datastore, &mut context.edge_cache)?;
+                create_coauthor_edge(author2, author1, datastore, &mut context.edge_cache)?;
+            }
+        }
+    }
 
     logger::debug(&format!(
-        "Ingested '{}': check={}ms, pub={}ms, authors={}ms, edges={}ms, total={}ms",
-        title,
-        added_pub.duration_since(start).as_millis(), // Note: limits of granularity here since we do check inside
-        added_pub.duration_since(start).as_millis(), // Ideally we'd separate check time from pub creation time if possible, but pub creation is fast
-        added_authors.duration_since(added_pub).as_millis(),
-        added_edges.duration_since(added_authors).as_millis(),
+        "Ingested batch of {} records ({} new) in {}ms",
+        records_len,
+        new_records.len(),
         start.elapsed().as_millis()
     ));
 

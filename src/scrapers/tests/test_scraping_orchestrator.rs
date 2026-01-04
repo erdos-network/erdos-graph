@@ -3,8 +3,9 @@ mod tests {
     use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::scraping_orchestrator::{
-        DeduplicationCache, add_publication, create_authored_edge, create_coauthor_edge,
-        get_or_create_author_vertex, normalize_title, publication_exists,
+        DeduplicationCache, IngestionContext, add_publication, create_authored_edge,
+        create_coauthor_edge, get_or_create_author_vertex, ingest_batch, normalize_title,
+        publication_exists,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use indradb::{
@@ -1161,5 +1162,116 @@ mod tests {
         assert_eq!(normalize_title("Complex-Networks!"), "complexnetworks"); // non-alphanumeric
         assert_eq!(normalize_title("   Spaces   "), "spaces");
         assert_eq!(normalize_title("The A An And Are"), ""); // all stop words
+    }
+    #[tokio::test]
+    async fn test_ingest_batch() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db_batch.rocksdb");
+        let mut database = RocksdbDatastore::new_db(&db_path).unwrap();
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec![],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
+            },
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        };
+
+        // Setup indexes
+        database
+            .index_property(Identifier::new("publication_id").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("year").unwrap())
+            .unwrap();
+        database
+            .index_property(Identifier::new("name").unwrap())
+            .unwrap();
+
+        let mut context = IngestionContext::new(100);
+
+        let records = vec![
+            PublicationRecord {
+                id: "batch:1".to_string(),
+                title: "Batch Paper 1".to_string(),
+                authors: vec!["Author One".to_string(), "Author Two".to_string()],
+                year: 2024,
+                venue: None,
+                source: "batch".to_string(),
+            },
+            PublicationRecord {
+                id: "batch:2".to_string(),
+                title: "Batch Paper 2".to_string(),
+                authors: vec!["Author Two".to_string(), "Author Three".to_string()], // Author Two is repeated
+                year: 2024,
+                venue: None,
+                source: "batch".to_string(),
+            },
+            // Duplicate of batch:1
+            PublicationRecord {
+                id: "batch:1".to_string(),
+                title: "Batch Paper 1".to_string(),
+                authors: vec!["Author One".to_string(), "Author Two".to_string()],
+                year: 2024,
+                venue: None,
+                source: "batch".to_string(),
+            },
+        ];
+
+        ingest_batch(records, &mut database, &config, &mut context)
+            .await
+            .unwrap();
+
+        // Verify Publications (should be 2, not 3)
+        let q = RangeVertexQuery::new().t(Identifier::new("Publication").unwrap());
+        let results = database.get(q).unwrap();
+        match &results[0] {
+            QueryOutputValue::Vertices(v) => assert_eq!(v.len(), 2),
+            _ => panic!("Expected vertices"),
+        };
+
+        // Verify Authors (should be 3: One, Two, Three)
+        let q = RangeVertexQuery::new().t(Identifier::new("Person").unwrap());
+        let results = database.get(q).unwrap();
+        match &results[0] {
+            QueryOutputValue::Vertices(v) => assert_eq!(v.len(), 3),
+            _ => panic!("Expected vertices"),
+        };
+
+        // Verify Edges (Paper 1: 2 authored, 1 coauthor (bidirectional = 2 edges))
+        // Verify Edges (Paper 2: 2 authored, 1 coauthor (bidirectional = 2 edges))
+        // Total authored: 4. Total coauthored: 4. Total: 8?
+        // Let's just check coauthored between One and Two exists.
+
+        let q = AllEdgeQuery;
+        let results = database.get(q).unwrap();
+        match &results[0] {
+            QueryOutputValue::Edges(e) => {
+                let authored = e
+                    .iter()
+                    .filter(|edge| edge.t.as_str() == "AUTHORED")
+                    .count();
+                let coauthored = e
+                    .iter()
+                    .filter(|edge| edge.t.as_str() == "COAUTHORED_WITH")
+                    .count();
+                assert_eq!(authored, 4);
+                assert_eq!(coauthored, 4);
+            }
+            _ => panic!("Expected edges"),
+        };
     }
 }
