@@ -29,6 +29,10 @@ pub(crate) struct DeduplicationCache {
     author_filter: Bloom<String>,
     /// Cache of known publication IDs (external IDs like arxiv:...) to avoid DB lookups
     published_ids: HashSet<String>,
+    /// Bloom filter for edges to reduce DB lookups
+    edge_filter: Bloom<String>,
+    /// Track if edges have been loaded
+    edges_loaded: bool,
 }
 
 impl DeduplicationCache {
@@ -38,6 +42,8 @@ impl DeduplicationCache {
             title_filter: Bloom::new_for_fp_rate(bloom_size, 0.01).unwrap(),
             author_filter: Bloom::new_for_fp_rate(bloom_size, 0.01).unwrap(),
             published_ids: HashSet::new(),
+            edge_filter: Bloom::new_for_fp_rate(bloom_size * 10, 0.01).unwrap(),
+            edges_loaded: false,
         }
     }
 
@@ -313,6 +319,41 @@ impl IngestionContext {
         }
     }
 
+    /// Preloads all edges into the bloom filter
+    fn preload_edge_bloom(
+        &mut self,
+        datastore: &Database<impl Datastore>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.dedup_cache.edges_loaded {
+            return Ok(());
+        }
+
+        let start = Instant::now();
+        logger::info("Preloading edge bloom filter...");
+
+        if let Ok(edge_type) = Identifier::new(crate::db::schema::COAUTHORED_WITH_TYPE) {
+            let q = RangeVertexQuery::new();
+            let q_out = q.outbound()?;
+            let q_edges = q_out.t(edge_type);
+            if let Ok(results) = datastore.get(q_edges)
+                && let Some(QueryOutputValue::Edges(edges)) = results.first()
+            {
+                let count = edges.len();
+                for edge in edges {
+                    let edge_key = format!("{}-{}", edge.outbound_id, edge.inbound_id);
+                    self.dedup_cache.edge_filter.set(&edge_key);
+                }
+                logger::info(&format!(
+                    "Preloaded {} edges into bloom filter in {}ms",
+                    count,
+                    start.elapsed().as_millis()
+                ));
+            }
+        }
+        self.dedup_cache.edges_loaded = true;
+        Ok(())
+    }
+
     /// Preloads all author vertices into the cache
     fn preload_authors(
         &mut self,
@@ -414,6 +455,10 @@ impl IngestionContext {
 
                     self.edge_cache
                         .insert((edge.outbound_id, edge.inbound_id), weight);
+
+                    // Update bloom filter
+                    let edge_key = format!("{}-{}", edge.outbound_id, edge.inbound_id);
+                    self.dedup_cache.edge_filter.set(&edge_key);
                 }
             }
         }
@@ -500,9 +545,12 @@ pub async fn run_scrape(
     let mut ingested_count = 0;
     let mut context = IngestionContext::new(config.deduplication.bloom_filter_size);
 
-    // Preload authors to speed up ingestion
+    // Preload authors and edges to speed up ingestion
     if let Err(e) = context.preload_authors(datastore) {
         logger::error(&format!("Failed to preload authors: {}", e));
+    }
+    if let Err(e) = context.preload_edge_bloom(datastore) {
+        logger::error(&format!("Failed to preload edge bloom filter: {}", e));
     }
 
     let loop_start_time = Instant::now();
@@ -676,8 +724,20 @@ pub(crate) async fn ingest_batch(
             for j in (i + 1)..authors.len() {
                 let author1 = &authors[i];
                 let author2 = &authors[j];
-                create_coauthor_edge(author1, author2, datastore, &mut context.edge_cache)?;
-                create_coauthor_edge(author2, author1, datastore, &mut context.edge_cache)?;
+                create_coauthor_edge(
+                    author1,
+                    author2,
+                    datastore,
+                    &mut context.edge_cache,
+                    &context.dedup_cache.edge_filter,
+                )?;
+                create_coauthor_edge(
+                    author2,
+                    author1,
+                    datastore,
+                    &mut context.edge_cache,
+                    &context.dedup_cache.edge_filter,
+                )?;
             }
         }
     }
@@ -935,6 +995,7 @@ pub(crate) fn create_coauthor_edge(
     author2: &Vertex,
     datastore: &mut Database<impl Datastore>,
     edge_cache: &mut HashMap<(Uuid, Uuid), u64>,
+    edge_bloom: &Bloom<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::db::schema::COAUTHORED_WITH_TYPE;
 
@@ -952,7 +1013,20 @@ pub(crate) fn create_coauthor_edge(
         return Ok(());
     }
 
-    // Check if edge exists
+    // Check bloom filter before DB query
+    let edge_key = format!("{}-{}", author1.id, author2.id);
+    let maybe_exists = edge_bloom.check(&edge_key);
+
+    if !maybe_exists {
+        // Definitely doesn't exist, create new edge
+        datastore.create_edge(&edge)?;
+        let q = SpecificEdgeQuery::single(edge);
+        datastore.set_properties(q, weight_prop, &Json::new(json!(1u64)))?;
+        edge_cache.insert(key, 1);
+        return Ok(());
+    }
+
+    // Might exist, check DB
     let q = SpecificEdgeQuery::single(edge.clone());
     let results = datastore.get(q)?;
 

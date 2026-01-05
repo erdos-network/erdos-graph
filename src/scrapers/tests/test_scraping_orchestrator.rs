@@ -577,9 +577,18 @@ mod tests {
         let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
 
         let mut edge_cache = HashMap::new();
+        use bloomfilter::Bloom;
+        let edge_bloom: Bloom<String> = Bloom::new_for_fp_rate(100, 0.01).unwrap();
 
         // 1. Create initial edge
-        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+        create_coauthor_edge(
+            &author1,
+            &author2,
+            &mut database,
+            &mut edge_cache,
+            &edge_bloom,
+        )
+        .unwrap();
 
         // Verify edge and weight
         let edge_type = Identifier::new("COAUTHORED_WITH").unwrap();
@@ -606,7 +615,14 @@ mod tests {
         assert_eq!(weight, 1);
 
         // 2. Increment weight (simulate second collaboration)
-        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+        create_coauthor_edge(
+            &author1,
+            &author2,
+            &mut database,
+            &mut edge_cache,
+            &edge_bloom,
+        )
+        .unwrap();
 
         let q = SpecificEdgeQuery::single(expected_edge.clone())
             .properties()
@@ -873,9 +889,18 @@ mod tests {
         let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
 
         let mut edge_cache = HashMap::new();
+        use bloomfilter::Bloom;
+        let mut edge_bloom: Bloom<String> = Bloom::new_for_fp_rate(100, 0.01).unwrap();
 
         // Create initial edge
-        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+        create_coauthor_edge(
+            &author1,
+            &author2,
+            &mut database,
+            &mut edge_cache,
+            &edge_bloom,
+        )
+        .unwrap();
 
         // Manually set weight as string (simulating legacy data)
         use crate::db::schema::COAUTHORED_WITH_TYPE;
@@ -890,11 +915,22 @@ mod tests {
             .set_properties(q, weight_prop, &Json::new(json!("1")))
             .unwrap();
 
+        // Update bloom filter with the edge key
+        let edge_key = format!("{}-{}", author1.id, author2.id);
+        edge_bloom.set(&edge_key);
+
         // Clear cache to force DB read
         edge_cache.clear();
 
         // Increment weight - should handle string format
-        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+        create_coauthor_edge(
+            &author1,
+            &author2,
+            &mut database,
+            &mut edge_cache,
+            &edge_bloom,
+        )
+        .unwrap();
 
         // Verify weight was incremented
         let q = SpecificEdgeQuery::single(edge.clone())
@@ -995,12 +1031,28 @@ mod tests {
         let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
 
         let mut edge_cache = HashMap::new();
+        use bloomfilter::Bloom;
+        let edge_bloom: Bloom<String> = Bloom::new_for_fp_rate(100, 0.01).unwrap();
 
         // Create edge - populates cache
-        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+        create_coauthor_edge(
+            &author1,
+            &author2,
+            &mut database,
+            &mut edge_cache,
+            &edge_bloom,
+        )
+        .unwrap();
 
         // Increment using cache
-        create_coauthor_edge(&author1, &author2, &mut database, &mut edge_cache).unwrap();
+        create_coauthor_edge(
+            &author1,
+            &author2,
+            &mut database,
+            &mut edge_cache,
+            &edge_bloom,
+        )
+        .unwrap();
 
         // Verify cache was used
         let key = (author1.id, author2.id);
