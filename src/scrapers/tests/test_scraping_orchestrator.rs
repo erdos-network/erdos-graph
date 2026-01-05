@@ -4,8 +4,8 @@ mod tests {
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::scraping_orchestrator::{
         DeduplicationCache, IngestionContext, add_publication, create_authored_edge,
-        create_coauthor_edge, get_or_create_author_vertex, ingest_batch, normalize_title,
-        publication_exists,
+        create_coauthor_edge, flush_buffer, get_or_create_author_vertex, ingest_batch,
+        normalize_title, publication_exists,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use indradb::{
@@ -378,7 +378,9 @@ mod tests {
             source: "arxiv".to_string(),
         };
 
-        add_publication(&record, &mut database).unwrap();
+        let mut write_buffer = Vec::new();
+        add_publication(&record, &mut write_buffer).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Verify vertex existence
         let q = RangeVertexQuery::new().limit(10);
@@ -449,8 +451,10 @@ mod tests {
         // 1. Create new author
         let author_name = "Paul Erdős";
         let mut author_cache = HashMap::new();
+        let mut write_buffer = Vec::new();
         let vertex1 =
-            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Verify vertex type
         assert_eq!(vertex1.t.as_str(), "Person");
@@ -490,16 +494,20 @@ mod tests {
         assert_eq!(get_prop("erdos_number"), "None");
 
         // 2. Get existing author
+        let mut write_buffer = Vec::new();
         let vertex2 =
-            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Should be the same vertex ID
         assert_eq!(vertex1.id, vertex2.id);
 
         // 3. Create a different author
         let other_name = "Alice Smith";
+        let mut write_buffer = Vec::new();
         let vertex3 =
-            get_or_create_author_vertex(other_name, &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex(other_name, &mut write_buffer, &mut author_cache).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         assert_ne!(vertex1.id, vertex3.id);
 
@@ -527,8 +535,9 @@ mod tests {
         // Create author and publication
         let author_name = "Paul Erdős";
         let mut author_cache = HashMap::new();
+        let mut write_buffer = Vec::new();
         let author =
-            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
 
         let record = PublicationRecord {
             id: "arxiv:1234.5678".to_string(),
@@ -538,10 +547,11 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-        let publication = add_publication(&record, &mut database).unwrap();
+        let publication = add_publication(&record, &mut write_buffer).unwrap();
 
         // Create edge
-        create_authored_edge(&author, &publication, &mut database).unwrap();
+        create_authored_edge(&author, &publication, &mut write_buffer).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Verify edge existence
         let q = AllEdgeQuery;
@@ -572,9 +582,12 @@ mod tests {
             .unwrap();
 
         let mut author_cache = HashMap::new();
+        let mut write_buffer = Vec::new();
         let author1 =
-            get_or_create_author_vertex("Alice", &mut database, &mut author_cache).unwrap();
-        let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex("Alice", &mut write_buffer, &mut author_cache).unwrap();
+        let author2 =
+            get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         let mut edge_cache = HashMap::new();
         use bloomfilter::Bloom;
@@ -585,10 +598,12 @@ mod tests {
             &author1,
             &author2,
             &mut database,
+            &mut write_buffer,
             &mut edge_cache,
             &edge_bloom,
         )
         .unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Verify edge and weight
         let edge_type = Identifier::new("COAUTHORED_WITH").unwrap();
@@ -619,10 +634,12 @@ mod tests {
             &author1,
             &author2,
             &mut database,
+            &mut write_buffer,
             &mut edge_cache,
             &edge_bloom,
         )
         .unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         let q = SpecificEdgeQuery::single(expected_edge.clone())
             .properties()
@@ -704,11 +721,13 @@ mod tests {
 
         // Create author and link it BEFORE adding publication
         // This ensures the bloom filter is populated correctly
+        let mut write_buffer = Vec::new();
         let author_v =
-            get_or_create_author_vertex("Author A", &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex("Author A", &mut write_buffer, &mut author_cache).unwrap();
 
-        let pub1 = add_publication(&record1, &mut database).unwrap();
-        create_authored_edge(&author_v, &pub1, &mut database).unwrap();
+        let pub1 = add_publication(&record1, &mut write_buffer).unwrap();
+        create_authored_edge(&author_v, &pub1, &mut write_buffer).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Should exist
         assert!(publication_exists(
@@ -817,7 +836,9 @@ mod tests {
             source: "test".to_string(),
         };
 
-        add_publication(&record, &mut database).unwrap();
+        let mut write_buffer = Vec::new();
+        add_publication(&record, &mut write_buffer).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         let mut dedup_cache = DeduplicationCache::new(100);
 
@@ -884,9 +905,11 @@ mod tests {
             .unwrap();
 
         let mut author_cache = HashMap::new();
+        let mut write_buffer = Vec::new();
         let author1 =
-            get_or_create_author_vertex("Alice", &mut database, &mut author_cache).unwrap();
-        let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex("Alice", &mut write_buffer, &mut author_cache).unwrap();
+        let author2 =
+            get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
 
         let mut edge_cache = HashMap::new();
         use bloomfilter::Bloom;
@@ -897,10 +920,12 @@ mod tests {
             &author1,
             &author2,
             &mut database,
+            &mut write_buffer,
             &mut edge_cache,
             &edge_bloom,
         )
         .unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Manually set weight as string (simulating legacy data)
         use crate::db::schema::COAUTHORED_WITH_TYPE;
@@ -923,14 +948,17 @@ mod tests {
         edge_cache.clear();
 
         // Increment weight - should handle string format
+        let mut write_buffer = Vec::new();
         create_coauthor_edge(
             &author1,
             &author2,
             &mut database,
+            &mut write_buffer,
             &mut edge_cache,
             &edge_bloom,
         )
         .unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Verify weight was incremented
         let q = SpecificEdgeQuery::single(edge.clone())
@@ -968,7 +996,9 @@ mod tests {
             source: "test".to_string(),
         };
 
-        let vertex = add_publication(&record, &mut database).unwrap();
+        let mut write_buffer = Vec::new();
+        let vertex = add_publication(&record, &mut write_buffer).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Verify all properties were set
         let q = SpecificVertexQuery::single(vertex.id).properties().unwrap();
@@ -996,12 +1026,15 @@ mod tests {
         let author_name = "Cached Author";
 
         // First call - creates and caches
+        let mut write_buffer = Vec::new();
         let vertex1 =
-            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Second call - should use cache
+        let mut write_buffer = Vec::new();
         let vertex2 =
-            get_or_create_author_vertex(author_name, &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
 
         assert_eq!(vertex1.id, vertex2.id);
 
@@ -1026,9 +1059,11 @@ mod tests {
             .unwrap();
 
         let mut author_cache = HashMap::new();
+        let mut write_buffer = Vec::new();
         let author1 =
-            get_or_create_author_vertex("Alice", &mut database, &mut author_cache).unwrap();
-        let author2 = get_or_create_author_vertex("Bob", &mut database, &mut author_cache).unwrap();
+            get_or_create_author_vertex("Alice", &mut write_buffer, &mut author_cache).unwrap();
+        let author2 =
+            get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
 
         let mut edge_cache = HashMap::new();
         use bloomfilter::Bloom;
@@ -1039,20 +1074,24 @@ mod tests {
             &author1,
             &author2,
             &mut database,
+            &mut write_buffer,
             &mut edge_cache,
             &edge_bloom,
         )
         .unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Increment using cache
         create_coauthor_edge(
             &author1,
             &author2,
             &mut database,
+            &mut write_buffer,
             &mut edge_cache,
             &edge_bloom,
         )
         .unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         // Verify cache was used
         let key = (author1.id, author2.id);
@@ -1116,8 +1155,10 @@ mod tests {
             source: "test".to_string(),
         };
 
-        add_publication(&record1, &mut database).unwrap();
-        add_publication(&record2, &mut database).unwrap();
+        let mut write_buffer = Vec::new();
+        add_publication(&record1, &mut write_buffer).unwrap();
+        add_publication(&record2, &mut write_buffer).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         let mut dedup_cache = DeduplicationCache::new(100);
 
@@ -1182,7 +1223,9 @@ mod tests {
             venue: None,
             source: "test".to_string(),
         };
-        add_publication(&record1, &mut database).unwrap();
+        let mut write_buffer = Vec::new();
+        add_publication(&record1, &mut write_buffer).unwrap();
+        flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         let mut dedup_cache = DeduplicationCache::new(100);
 

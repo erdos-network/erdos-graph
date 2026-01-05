@@ -6,8 +6,8 @@ use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
 use bloomfilter::Bloom;
 use chrono::{DateTime, Utc};
 use indradb::{
-    Database, Datastore, Edge, Identifier, Json, QueryExt, QueryOutputValue, RangeVertexQuery,
-    SpecificEdgeQuery, SpecificVertexQuery, Vertex,
+    BulkInsertItem, Database, Datastore, Edge, Identifier, Json, QueryExt, QueryOutputValue,
+    RangeVertexQuery, SpecificEdgeQuery, SpecificVertexQuery, Vertex,
 };
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +18,15 @@ use textdistance::Cosine;
 use uuid::Uuid;
 
 use std::time::Instant;
+
+/// Represents a buffered write operation for the database.
+#[derive(Debug, Clone)]
+pub(crate) enum WriteOperation {
+    CreateVertex(Vertex),
+    CreateEdge(Edge),
+    SetVertexProperties(Uuid, Identifier, Json),
+    SetEdgeProperties(Edge, Identifier, Json),
+}
 
 /// Helper struct to manage deduplication caching.
 pub(crate) struct DeduplicationCache {
@@ -308,6 +317,7 @@ pub(crate) struct IngestionContext {
     pub dedup_cache: DeduplicationCache,
     pub author_cache: HashMap<String, Vertex>,
     pub edge_cache: HashMap<(Uuid, Uuid), u64>,
+    pub write_buffer: Vec<WriteOperation>,
 }
 
 impl IngestionContext {
@@ -316,6 +326,7 @@ impl IngestionContext {
             dedup_cache: DeduplicationCache::new(bloom_size),
             author_cache: HashMap::new(),
             edge_cache: HashMap::new(),
+            write_buffer: Vec::with_capacity(1000),
         }
     }
 
@@ -625,6 +636,43 @@ pub async fn run_scrape(
     Ok(())
 }
 
+/// Flushes the write buffer to the database using bulk operations.
+pub(crate) fn flush_buffer(
+    buffer: &mut Vec<WriteOperation>,
+    datastore: &mut Database<impl Datastore>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if buffer.is_empty() {
+        return Ok(());
+    }
+
+    let start = Instant::now();
+    let count = buffer.len();
+    let mut bulk_items = Vec::with_capacity(count);
+
+    for op in buffer.drain(..) {
+        match op {
+            WriteOperation::CreateVertex(v) => bulk_items.push(BulkInsertItem::Vertex(v)),
+            WriteOperation::CreateEdge(e) => bulk_items.push(BulkInsertItem::Edge(e)),
+            WriteOperation::SetVertexProperties(id, name, val) => {
+                bulk_items.push(BulkInsertItem::VertexProperty(id, name, val));
+            }
+            WriteOperation::SetEdgeProperties(edge, name, val) => {
+                bulk_items.push(BulkInsertItem::EdgeProperty(edge, name, val));
+            }
+        }
+    }
+
+    datastore.bulk_insert(bulk_items)?;
+
+    logger::debug(&format!(
+        "Flushed {} operations in {}ms",
+        count,
+        start.elapsed().as_millis()
+    ));
+
+    Ok(())
+}
+
 /// Ingests a batch of publication records into the database.
 pub(crate) async fn ingest_batch(
     records: Vec<PublicationRecord>,
@@ -672,7 +720,7 @@ pub(crate) async fn ingest_batch(
     // Ideally we would filter for unknown authors and bulk create, but existing helper is singular.
     // For now, we iterate, but since cache is preloaded/warm, it should be fast.
     for author in &batch_authors {
-        get_or_create_author_vertex(author, datastore, &mut context.author_cache)?;
+        get_or_create_author_vertex(author, &mut context.write_buffer, &mut context.author_cache)?;
     }
 
     // Collection of author vertices for each record to avoid re-lookup
@@ -681,7 +729,7 @@ pub(crate) async fn ingest_batch(
 
     // 3. Publication Creation
     for record in &new_records {
-        let pub_vertex = add_publication(record, datastore)?;
+        let pub_vertex = add_publication(record, &mut context.write_buffer)?;
         context.dedup_cache.add(
             record.year,
             pub_vertex.id,
@@ -696,7 +744,7 @@ pub(crate) async fn ingest_batch(
             if let Some(v) = context.author_cache.get(&norm) {
                 authors_for_rec.push(v.clone());
                 all_involved_authors.insert(v.id);
-                create_authored_edge(v, &pub_vertex, datastore)?;
+                create_authored_edge(v, &pub_vertex, &mut context.write_buffer)?;
             }
         }
         record_author_vertices.push(authors_for_rec);
@@ -728,6 +776,7 @@ pub(crate) async fn ingest_batch(
                     author1,
                     author2,
                     datastore,
+                    &mut context.write_buffer,
                     &mut context.edge_cache,
                     &context.dedup_cache.edge_filter,
                 )?;
@@ -735,12 +784,15 @@ pub(crate) async fn ingest_batch(
                     author2,
                     author1,
                     datastore,
+                    &mut context.write_buffer,
                     &mut context.edge_cache,
                     &context.dedup_cache.edge_filter,
                 )?;
             }
         }
     }
+
+    flush_buffer(&mut context.write_buffer, datastore)?;
 
     logger::debug(&format!(
         "Ingested batch of {} records ({} new) in {}ms",
@@ -869,14 +921,14 @@ fn check_authors_similarity(
 /// Returns an error if database operations fail
 pub(crate) fn add_publication(
     record: &PublicationRecord,
-    datastore: &mut Database<impl Datastore>,
+    write_buffer: &mut Vec<WriteOperation>,
 ) -> Result<Vertex, Box<dyn std::error::Error>> {
     use crate::db::schema::PUBLICATION_TYPE;
 
     let vertex_type = Identifier::new(PUBLICATION_TYPE)?;
     let vertex = Vertex::new(vertex_type);
 
-    datastore.create_vertex(&vertex)?;
+    write_buffer.push(WriteOperation::CreateVertex(vertex.clone()));
 
     let properties = vec![
         ("title", json!(record.title)),
@@ -886,10 +938,11 @@ pub(crate) fn add_publication(
     ];
 
     for (name, value) in properties {
-        let q = SpecificVertexQuery::single(vertex.id);
         let prop_name = Identifier::new(name)?;
         let json_val = Json::new(value);
-        datastore.set_properties(q, prop_name, &json_val)?;
+        write_buffer.push(WriteOperation::SetVertexProperties(
+            vertex.id, prop_name, json_val,
+        ));
     }
 
     Ok(vertex)
@@ -908,7 +961,7 @@ pub(crate) fn add_publication(
 /// Returns an error if database operations fail
 pub(crate) fn get_or_create_author_vertex(
     author_name: &str,
-    datastore: &mut Database<impl Datastore>,
+    write_buffer: &mut Vec<WriteOperation>,
     author_cache: &mut HashMap<String, Vertex>,
 ) -> Result<Vertex, Box<dyn std::error::Error>> {
     use crate::db::schema::PERSON_TYPE;
@@ -926,7 +979,7 @@ pub(crate) fn get_or_create_author_vertex(
 
     // Create new vertex
     let vertex = Vertex::new(person_type);
-    datastore.create_vertex(&vertex)?;
+    write_buffer.push(WriteOperation::CreateVertex(vertex.clone()));
 
     // Set properties
     let properties = vec![
@@ -938,10 +991,11 @@ pub(crate) fn get_or_create_author_vertex(
     ];
 
     for (name, value) in properties {
-        let q = SpecificVertexQuery::single(vertex.id);
         let prop_name = Identifier::new(name)?;
         let json_val = Json::new(value);
-        datastore.set_properties(q, prop_name, &json_val)?;
+        write_buffer.push(WriteOperation::SetVertexProperties(
+            vertex.id, prop_name, json_val,
+        ));
     }
 
     author_cache.insert(norm_name, vertex.clone());
@@ -963,14 +1017,14 @@ pub(crate) fn get_or_create_author_vertex(
 pub(crate) fn create_authored_edge(
     author: &Vertex,
     publication: &Vertex,
-    datastore: &mut Database<impl Datastore>,
+    write_buffer: &mut Vec<WriteOperation>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::db::schema::AUTHORED_TYPE;
 
     let edge_type = Identifier::new(AUTHORED_TYPE)?;
     let edge = Edge::new(author.id, edge_type, publication.id);
 
-    datastore.create_edge(&edge)?;
+    write_buffer.push(WriteOperation::CreateEdge(edge));
 
     Ok(())
 }
@@ -994,6 +1048,7 @@ pub(crate) fn create_coauthor_edge(
     author1: &Vertex,
     author2: &Vertex,
     datastore: &mut Database<impl Datastore>,
+    write_buffer: &mut Vec<WriteOperation>,
     edge_cache: &mut HashMap<(Uuid, Uuid), u64>,
     edge_bloom: &Bloom<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1007,8 +1062,11 @@ pub(crate) fn create_coauthor_edge(
     // Check cache first
     if let Some(&weight) = edge_cache.get(&key) {
         let new_weight = weight + 1;
-        let q = SpecificEdgeQuery::single(edge.clone());
-        datastore.set_properties(q, weight_prop, &Json::new(json!(new_weight)))?;
+        write_buffer.push(WriteOperation::SetEdgeProperties(
+            edge,
+            weight_prop,
+            Json::new(json!(new_weight)),
+        ));
         edge_cache.insert(key, new_weight);
         return Ok(());
     }
@@ -1019,9 +1077,12 @@ pub(crate) fn create_coauthor_edge(
 
     if !maybe_exists {
         // Definitely doesn't exist, create new edge
-        datastore.create_edge(&edge)?;
-        let q = SpecificEdgeQuery::single(edge);
-        datastore.set_properties(q, weight_prop, &Json::new(json!(1u64)))?;
+        write_buffer.push(WriteOperation::CreateEdge(edge.clone()));
+        write_buffer.push(WriteOperation::SetEdgeProperties(
+            edge,
+            weight_prop,
+            Json::new(json!(1u64)),
+        ));
         edge_cache.insert(key, 1);
         return Ok(());
     }
@@ -1057,19 +1118,23 @@ pub(crate) fn create_coauthor_edge(
             .unwrap_or(1);
 
         let new_weight = current_weight + 1;
-        let q = SpecificEdgeQuery::single(edge.clone());
-        datastore.set_properties(q, weight_prop, &Json::new(json!(new_weight)))?;
+        write_buffer.push(WriteOperation::SetEdgeProperties(
+            edge,
+            weight_prop,
+            Json::new(json!(new_weight)),
+        ));
 
         edge_cache.insert(key, new_weight);
         return Ok(());
     }
 
     // Create new edge
-    datastore.create_edge(&edge)?;
-
-    // Initialize properties
-    let q = SpecificEdgeQuery::single(edge);
-    datastore.set_properties(q, weight_prop, &Json::new(json!(1u64)))?;
+    write_buffer.push(WriteOperation::CreateEdge(edge.clone()));
+    write_buffer.push(WriteOperation::SetEdgeProperties(
+        edge.clone(),
+        weight_prop,
+        Json::new(json!(1u64)),
+    ));
 
     edge_cache.insert(key, 1);
 
