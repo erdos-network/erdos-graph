@@ -16,14 +16,17 @@
 //! use erdos_graph::scrapers::dblp::DblpScraper;
 //! use erdos_graph::scrapers::scraper::Scraper;
 //! use chrono::{Utc, TimeZone};
+//! use erdos_graph::utilities::thread_safe_queue::{ThreadSafeQueue, QueueConfig};
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let scraper = DblpScraper::new();
 //! let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
 //! let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
 //!
-//! let records = scraper.scrape_range(start, end).await?;
-//! println!("Found {} records", records.len());
+//! let queue = ThreadSafeQueue::new(QueueConfig::default());
+//! let producer = queue.create_producer();
+//! scraper.scrape_range(start, end, producer).await?;
+//! println!("Scraping completed");
 //! # Ok(())
 //! # }
 //! ```
@@ -31,6 +34,7 @@
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use crate::scrapers::scraper::Scraper;
+use crate::utilities::thread_safe_queue::QueueProducer;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
 use reqwest::Client;
@@ -86,8 +90,9 @@ impl Scraper for DblpScraper {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-        scrape_range_with_config(start, end, self.config.clone()).await
+        producer: QueueProducer<PublicationRecord>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        scrape_range_with_config(start, end, self.config.clone(), producer).await
     }
 }
 
@@ -207,19 +212,20 @@ impl Default for AuthorField {
 pub async fn scrape_range(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
-    scrape_range_with_config(start_date, end_date, DblpSourceConfig::default()).await
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    scrape_range_with_config(start_date, end_date, DblpSourceConfig::default(), producer).await
 }
 
 /// Scrapes DBLP publication data with a custom configuration.
 ///
 /// This function contains the core logic for scraping. It:
-/// 1. Iterates through each year in the date range.
-/// 2. Constructs the DBLP API URL for the query `year:YYYY`.
-/// 3. Fetches pages of results using the configured `page_size`.
-/// 4. Caches responses to the `.dblp_cache` directory to avoid re-fetching.
-/// 5. Parses the JSON response and converts hits to `PublicationRecord` objects.
-/// 6. Respects the `delay_ms` configuration to rate limit requests.
+/// - Iterate through each year in the date range
+/// - Construct the DBLP API URL for the query
+/// - Fetch pages of results using the configured page size
+/// - Cache responses to avoid re-fetching
+/// - Parse JSON response and convert hits to records
+/// - Rate limit requests based on configuration
 ///
 /// # Arguments
 ///
@@ -235,15 +241,16 @@ pub async fn scrape_range_with_config(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     config: DblpSourceConfig,
-) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
     if start_date >= end_date {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
     let start_year = start_date.year();
     let end_year = end_date.year();
     let client = Client::new();
-    let mut all_records = Vec::new();
+    // let mut all_records = Vec::new();
     let current_year = Utc::now().year();
 
     for year in start_year..=end_year {
@@ -310,8 +317,11 @@ pub async fn scrape_range_with_config(
 
             // Process hits
             for hit in hits {
+                #[allow(clippy::collapsible_if)]
                 if let Some(record) = hit.info.and_then(convert_hit_to_record) {
-                    all_records.push(record);
+                    if let Err(e) = producer.submit(record) {
+                        logger::error(&format!("Failed to submit record: {}", e));
+                    }
                 }
             }
 
@@ -326,17 +336,17 @@ pub async fn scrape_range_with_config(
         }
     }
 
-    Ok(all_records)
+    Ok(())
 }
 
 /// Helper function to fetch URL with file-based caching.
 ///
 /// This function:
-/// 1. Computes a SHA256 hash of the URL to use as the cache filename.
-/// 2. Checks if the file exists in `.dblp_cache`.
-/// 3. If it exists, returns the content from the file.
-/// 4. If not, fetches the URL using `reqwest`.
-/// 5. If the fetch is successful, writes the content to the cache file and returns it.
+/// - Compute SHA256 hash of the URL to use as the cache filename
+/// - Check if the file exists in the cache directory
+/// - Return content from file if it exists
+/// - Fetch URL using reqwest if not cached
+/// - Write content to cache file and return it on success
 async fn fetch_url_cached(
     client: &Client,
     url: &str,

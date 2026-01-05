@@ -5,6 +5,7 @@ mod tests {
         ZbmathConfig, convert_to_publication_record, scrape_chunk_with_config,
         scrape_range_with_config,
     };
+    use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use chrono::{TimeZone, Utc};
     use mockito::{Matcher, Server};
 
@@ -18,7 +19,15 @@ mod tests {
             base_url: mock_url.to_string(),
             delay_between_pages_ms: 1, // Fast for tests
         };
-        scrape_range_with_config(start, end, config).await
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        scrape_range_with_config(start, end, config, producer).await?;
+
+        let mut results = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            results.push(r);
+        }
+        Ok(results)
     }
 
     // Helper function for testing scrape_chunk with mock server
@@ -32,7 +41,15 @@ mod tests {
             base_url: mock_url.to_string(),
             delay_between_pages_ms: 1,
         };
-        scrape_chunk_with_config(client, start, end, &config).await
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        scrape_chunk_with_config(client, start, end, &config, producer).await?;
+
+        let mut results = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            results.push(r);
+        }
+        Ok(results)
     }
 
     /// Test ZbmathConfig Default implementation

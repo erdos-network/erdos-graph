@@ -82,7 +82,6 @@ mod tests {
     /// - Weekly mode uses checkpoints if they exist
     /// - Checkpoint-based resumption works correctly
     /// - Small incremental updates work
-    #[ignore = "too long"]
     #[tokio::test]
     async fn test_full_pipeline_weekly_mode_dblp() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
@@ -144,7 +143,6 @@ mod tests {
     /// - Multiple sources can be processed together
     /// - Each source gets its own checkpoint
     /// - Parallel processing works correctly
-    #[ignore = "too long"]
     #[tokio::test]
     async fn test_full_pipeline_multiple_sources() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
@@ -209,7 +207,6 @@ mod tests {
     /// - Checkpoints are saved after processing
     /// - Subsequent runs resume from checkpoint
     /// - No duplicate processing occurs
-    #[ignore = "too long"]
     #[tokio::test]
     async fn test_checkpoint_persistence_and_resumption() -> Result<(), Box<dyn std::error::Error>>
     {
@@ -292,7 +289,6 @@ mod tests {
     /// - Date ranges are properly chunked
     /// - Small ranges work correctly
     /// - Chunk boundaries are respected
-    #[ignore = "too long"]
     #[tokio::test]
     async fn test_chunking_small_range() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
@@ -349,7 +345,6 @@ mod tests {
     /// - Full mode ignores checkpoints for start date calculation
     /// - Can process from very early dates
     /// - Works with default configuration
-    #[ignore = "too long"]
     #[tokio::test]
     async fn test_full_mode_from_beginning() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;

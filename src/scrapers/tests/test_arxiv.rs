@@ -1,11 +1,29 @@
 #[cfg(test)]
 mod tests {
     use crate::config::ArxivSourceConfig;
+    use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::arxiv;
-    use chrono::{TimeZone, Utc};
+    use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
+    use chrono::{DateTime, TimeZone, Utc};
     use wiremock::matchers::query_param;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn scrape_and_collect(
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        cfg: ArxivSourceConfig,
+    ) -> Result<Vec<PublicationRecord>, Box<dyn std::error::Error>> {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        arxiv::scrape_range_with_config_async(start, end, cfg, producer).await?;
+
+        let mut results = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            results.push(r);
+        }
+        Ok(results)
+    }
 
     /// Deterministic test for `scrape_range_async` using a local mock HTTP server.
     ///
@@ -59,9 +77,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
 
-        let records = arxiv::scrape_range_with_config_async(start, end, cfg)
-            .await
-            .unwrap();
+        let records = scrape_and_collect(start, end, cfg).await.unwrap();
 
         assert_eq!(records.len(), 2, "expected two records parsed from feed");
         let titles: Vec<_> = records.iter().map(|r| r.title.as_str()).collect();
@@ -135,9 +151,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
 
-        let records = arxiv::scrape_range_with_config_async(start, end, cfg)
-            .await
-            .unwrap();
+        let records = scrape_and_collect(start, end, cfg).await.unwrap();
         let titles: Vec<_> = records.iter().map(|r| r.title.as_str()).collect();
         assert_eq!(titles.len(), 2);
         assert!(titles.contains(&"Page One"));
@@ -180,9 +194,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
 
-        let records = arxiv::scrape_range_with_config_async(start, end, cfg)
-            .await
-            .unwrap();
+        let records = scrape_and_collect(start, end, cfg).await.unwrap();
 
         assert!(records.is_empty(), "expected no records for inverted range");
     }
@@ -211,9 +223,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
 
-        let records = arxiv::scrape_range_with_config_async(start, end, cfg)
-            .await
-            .unwrap();
+        let records = scrape_and_collect(start, end, cfg).await.unwrap();
         assert!(records.is_empty());
     }
 
@@ -242,7 +252,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
 
-        let res = arxiv::scrape_range_with_config_async(start, end, cfg).await;
+        let res = scrape_and_collect(start, end, cfg).await;
         match res {
             Ok(v) => {
                 // Some parsers may treat truncated input as EOF without producing
@@ -287,9 +297,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
 
-        let records = arxiv::scrape_range_with_config_async(start, end, cfg)
-            .await
-            .unwrap();
+        let records = scrape_and_collect(start, end, cfg).await.unwrap();
         assert_eq!(records.len(), 1);
         let r = &records[0];
         assert_eq!(r.id, "http://arxiv.org/abs/5555.0000v1");
@@ -337,9 +345,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
 
-        let records = arxiv::scrape_range_with_config_async(start, end, cfg)
-            .await
-            .unwrap();
+        let records = scrape_and_collect(start, end, cfg).await.unwrap();
         assert_eq!(records.len(), 1);
         let r = &records[0];
         assert_eq!(r.authors.len(), 50);
@@ -377,9 +383,7 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2025, 9, 1, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2025, 11, 1, 0, 0, 0).unwrap();
 
-        let records = arxiv::scrape_range_with_config_async(start, end, cfg)
-            .await
-            .unwrap();
+        let records = scrape_and_collect(start, end, cfg).await.unwrap();
         assert_eq!(records.len(), 1);
         let r = &records[0];
         assert_eq!(r.title, "A & B <C>");
