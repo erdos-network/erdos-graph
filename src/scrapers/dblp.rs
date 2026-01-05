@@ -16,14 +16,17 @@
 //! use erdos_graph::scrapers::dblp::DblpScraper;
 //! use erdos_graph::scrapers::scraper::Scraper;
 //! use chrono::{Utc, TimeZone};
+//! use erdos_graph::utilities::thread_safe_queue::{ThreadSafeQueue, QueueConfig};
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let scraper = DblpScraper::new();
 //! let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
 //! let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
 //!
-//! let records = scraper.scrape_range(start, end).await?;
-//! println!("Found {} records", records.len());
+//! let queue = ThreadSafeQueue::new(QueueConfig::default());
+//! let producer = queue.create_producer();
+//! scraper.scrape_range(start, end, producer).await?;
+//! println!("Scraping completed");
 //! # Ok(())
 //! # }
 //! ```
@@ -314,6 +317,7 @@ pub async fn scrape_range_with_config(
 
             // Process hits
             for hit in hits {
+                #[allow(clippy::collapsible_if)]
                 if let Some(record) = hit.info.and_then(convert_hit_to_record) {
                     if let Err(e) = producer.submit(record) {
                         logger::error(&format!("Failed to submit record: {}", e));

@@ -385,6 +385,7 @@ impl IngestionContext {
                 let count = vps.len();
                 for vp in vps {
                     for p in &vp.props {
+                        #[allow(clippy::collapsible_if)]
                         if p.name == name_prop {
                             if let Some(name) = p.value.as_str() {
                                 let norm_name = normalize_author(name);
@@ -590,7 +591,7 @@ pub async fn run_scrape(
         if should_flush {
             let batch_len = batch.len();
             if let Err(e) =
-                ingest_batch(batch.drain(..).collect(), datastore, config, &mut context).await
+                ingest_batch(std::mem::take(&mut batch), datastore, config, &mut context).await
             {
                 logger::error(&format!("Failed to ingest batch: {}", e));
             }
@@ -760,6 +761,7 @@ pub(crate) async fn ingest_batch(
         .cloned()
         .collect();
 
+    #[allow(clippy::collapsible_if)]
     if !unique_author_vertices.is_empty() {
         if let Err(e) = context.prefetch_coauthor_edges(&unique_author_vertices, datastore) {
             logger::error(&format!("Failed to prefetch batch co-author edges: {}", e));

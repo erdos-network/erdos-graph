@@ -53,7 +53,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "too long"]
     async fn test_scraping_flow_dblp() -> Result<(), Box<dyn std::error::Error>> {
         // Create a temporary database
         let temp_dir = TempDir::new()?;

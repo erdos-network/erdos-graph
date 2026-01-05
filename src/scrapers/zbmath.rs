@@ -287,6 +287,7 @@ pub async fn scrape_chunk_with_config(
             ));
             // Convert OAI-PMH records to PublicationRecord
             for record in list_records.records {
+                #[allow(clippy::collapsible_if)]
                 if let Some(publication) = convert_to_publication_record(record)? {
                     if let Err(e) = producer.submit(publication) {
                         logger::error(&format!("Failed to submit record: {}", e));
