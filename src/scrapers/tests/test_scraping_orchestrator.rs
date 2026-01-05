@@ -685,7 +685,14 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-        add_publication(&record1, &mut database).unwrap();
+
+        // Create author and link it BEFORE adding publication
+        // This ensures the bloom filter is populated correctly
+        let author_v =
+            get_or_create_author_vertex("Author A", &mut database, &mut author_cache).unwrap();
+
+        let pub1 = add_publication(&record1, &mut database).unwrap();
+        create_authored_edge(&author_v, &pub1, &mut database).unwrap();
 
         // Should exist
         assert!(publication_exists(
@@ -704,19 +711,6 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-
-        // Ensure the author is linked to the first publication for author check to pass
-        let author_v =
-            get_or_create_author_vertex("Author A", &mut database, &mut author_cache).unwrap();
-
-        // Find record1 vertex
-        let pub1_q = RangeVertexQuery::new().t(Identifier::new("Publication").unwrap());
-        let pub_res = database.get(pub1_q).unwrap();
-        let pub1 = match &pub_res[0] {
-            QueryOutputValue::Vertices(v) => v[0].clone(),
-            _ => panic!(),
-        };
-        create_authored_edge(&author_v, &pub1, &mut database).unwrap();
 
         // Check if fuzzy match detects existing publication
         assert!(publication_exists(
