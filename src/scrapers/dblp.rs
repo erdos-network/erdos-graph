@@ -220,12 +220,12 @@ pub async fn scrape_range(
 /// Scrapes DBLP publication data with a custom configuration.
 ///
 /// This function contains the core logic for scraping. It:
-/// 1. Iterates through each year in the date range.
-/// 2. Constructs the DBLP API URL for the query `year:YYYY`.
-/// 3. Fetches pages of results using the configured `page_size`.
-/// 4. Caches responses to the `.dblp_cache` directory to avoid re-fetching.
-/// 5. Parses the JSON response and converts hits to `PublicationRecord` objects.
-/// 6. Respects the `delay_ms` configuration to rate limit requests.
+/// - Iterate through each year in the date range
+/// - Construct the DBLP API URL for the query
+/// - Fetch pages of results using the configured page size
+/// - Cache responses to avoid re-fetching
+/// - Parse JSON response and convert hits to records
+/// - Rate limit requests based on configuration
 ///
 /// # Arguments
 ///
@@ -342,11 +342,11 @@ pub async fn scrape_range_with_config(
 /// Helper function to fetch URL with file-based caching.
 ///
 /// This function:
-/// 1. Computes a SHA256 hash of the URL to use as the cache filename.
-/// 2. Checks if the file exists in `.dblp_cache`.
-/// 3. If it exists, returns the content from the file.
-/// 4. If not, fetches the URL using `reqwest`.
-/// 5. If the fetch is successful, writes the content to the cache file and returns it.
+/// - Compute SHA256 hash of the URL to use as the cache filename
+/// - Check if the file exists in the cache directory
+/// - Return content from file if it exists
+/// - Fetch URL using reqwest if not cached
+/// - Write content to cache file and return it on success
 async fn fetch_url_cached(
     client: &Client,
     url: &str,

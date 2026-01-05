@@ -404,8 +404,7 @@ impl IngestionContext {
         Ok(())
     }
 
-    /// Pre-fetches existing edges between authors to warm the cache.
-    /// This reduces DB reads from O(N^2) to O(1) per publication.
+    /// Pre-fetches existing edges to warm the cache and limit DB reads
     fn prefetch_coauthor_edges(
         &mut self,
         authors: &[Vertex],
@@ -422,7 +421,7 @@ impl IngestionContext {
         let author_id_set: HashSet<Uuid> = author_ids.iter().cloned().collect();
         let edge_type = Identifier::new(COAUTHORED_WITH_TYPE)?;
 
-        // 1. Get all outbound edges of type COAUTHORED_WITH from these authors
+        // Get all outbound edges of type COAUTHORED_WITH from these authors
         let q = SpecificVertexQuery::new(author_ids)
             .outbound()?
             .t(edge_type);
@@ -443,7 +442,7 @@ impl IngestionContext {
             return Ok(());
         }
 
-        // 2. Fetch properties (weight) for these edges
+        // Fetch properties (weight) for these edges
         let weight_prop = Identifier::new("weight")?;
         let q_props = SpecificEdgeQuery::new(relevant_edges.clone())
             .properties()?
@@ -687,7 +686,7 @@ pub(crate) async fn ingest_batch(
         return Ok(());
     }
 
-    // 1. Deduplication
+    // Filter out duplicates
     let mut new_records = Vec::with_capacity(records.len());
     let mut batch_seen_ids = HashSet::new();
 
@@ -707,7 +706,7 @@ pub(crate) async fn ingest_batch(
         return Ok(());
     }
 
-    // 2. Author Resolution & Creation
+    // Resolve author vertices
     let mut batch_authors = HashSet::new();
     for record in &new_records {
         for author in &record.authors {
@@ -715,20 +714,16 @@ pub(crate) async fn ingest_batch(
         }
     }
 
-    // Ensure all authors exist
-    // Note: get_or_create_author_vertex checks cache first.
-    // We can optimize this further by batch checking, but get_or_create is reasonably fast with cache.
-    // Ideally we would filter for unknown authors and bulk create, but existing helper is singular.
-    // For now, we iterate, but since cache is preloaded/warm, it should be fast.
+    // Ensure all authors exist using cache or create new vertices
     for author in &batch_authors {
         get_or_create_author_vertex(author, &mut context.write_buffer, &mut context.author_cache)?;
     }
 
-    // Collection of author vertices for each record to avoid re-lookup
+    // Collect author vertices for each record to avoid re-lookup
     let mut record_author_vertices: Vec<Vec<Vertex>> = Vec::with_capacity(new_records.len());
     let mut all_involved_authors: HashSet<Uuid> = HashSet::new();
 
-    // 3. Publication Creation
+    // Create publication vertices
     for record in &new_records {
         let pub_vertex = add_publication(record, &mut context.write_buffer)?;
         context.dedup_cache.add(
@@ -751,9 +746,8 @@ pub(crate) async fn ingest_batch(
         record_author_vertices.push(authors_for_rec);
     }
 
-    // 4. Edge Prefetching & Creation
-    // We collect all unique authors involved in this batch to prefetch edges between them.
-    // Convert back to Vec<Vertex> for prefetch
+    // Prefetch and create co-author edges
+    // Collect unique authors to prefetch edges in bulk
     let unique_author_vertices: Vec<Vertex> = context
         .author_cache
         .values()
