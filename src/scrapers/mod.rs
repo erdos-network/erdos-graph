@@ -9,7 +9,9 @@
 //! within a specified date range and returns them as `PublicationRecord` objects.
 
 pub mod arxiv;
+pub mod cache;
 pub mod dblp;
+pub mod ingestion_utils;
 pub mod scraper;
 pub mod scraping_orchestrator;
 pub mod zbmath;

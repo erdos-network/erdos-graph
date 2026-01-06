@@ -2,10 +2,11 @@
 mod tests {
     use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
     use crate::db::ingestion::PublicationRecord;
-    use crate::scrapers::scraping_orchestrator::{
-        DeduplicationCache, IngestionContext, add_publication, create_authored_edge,
+    use crate::scrapers::cache::{DeduplicationCache, EdgeCacheSystem, normalize_title};
+    use crate::scrapers::ingestion_utils::{
+        IngestionContext, WriteOperation, add_publication, create_authored_edge,
         create_coauthor_edge, flush_buffer, get_or_create_author_vertex, ingest_batch,
-        normalize_title, publication_exists,
+        publication_exists,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use indradb::{
@@ -491,7 +492,7 @@ mod tests {
         };
 
         assert_eq!(get_prop("name"), author_name);
-        assert_eq!(get_prop("erdos_number"), "None");
+        assert_eq!(get_prop("erdos_number"), "");
 
         // 2. Get existing author
         let mut write_buffer = Vec::new();
@@ -591,7 +592,6 @@ mod tests {
         flush_buffer(&mut write_buffer, &mut database).unwrap();
 
         use crate::config::EdgeCacheConfig;
-        use crate::scrapers::scraping_orchestrator::EdgeCacheSystem;
         let mut edge_cache = EdgeCacheSystem::new(EdgeCacheConfig::default());
 
         // Populate bloom but not cache (simulate cold edge)
@@ -608,7 +608,7 @@ mod tests {
         let edge_type = Identifier::new(COAUTHORED_WITH_TYPE).unwrap();
         let edge = Edge::new(author1.id, edge_type, author2.id);
         let mut wb2 = Vec::new();
-        wb2.push(crate::scrapers::scraping_orchestrator::WriteOperation::CreateEdge(edge.clone()));
+        wb2.push(WriteOperation::CreateEdge(edge.clone()));
         flush_buffer(&mut wb2, &mut database).unwrap();
 
         // NOW call create_coauthor_edge
@@ -894,7 +894,6 @@ mod tests {
             get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
 
         use crate::config::EdgeCacheConfig;
-        use crate::scrapers::scraping_orchestrator::EdgeCacheSystem;
         let mut edge_cache = EdgeCacheSystem::new(EdgeCacheConfig::default());
 
         // Create initial edge
@@ -1039,7 +1038,6 @@ mod tests {
             get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
 
         use crate::config::EdgeCacheConfig;
-        use crate::scrapers::scraping_orchestrator::EdgeCacheSystem;
         let mut edge_cache = EdgeCacheSystem::new(EdgeCacheConfig::default());
 
         // Pre-populate cache
