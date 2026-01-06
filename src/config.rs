@@ -8,6 +8,8 @@ pub struct Config {
     pub scrapers: ScraperConfig,
     pub ingestion: IngestionConfig,
     pub deduplication: DeduplicationConfig,
+    #[serde(default)]
+    pub edge_cache: EdgeCacheConfig,
     pub heartbeat_timeout_s: u64,
     pub polling_interval_ms: u64,
 }
@@ -22,6 +24,36 @@ pub struct DeduplicationConfig {
 
 fn default_bloom_filter_size() -> usize {
     200_000
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct EdgeCacheConfig {
+    #[serde(default = "default_edge_hot_size")]
+    pub hot_size: usize,
+    #[serde(default = "default_edge_warm_size")]
+    pub warm_size: usize,
+    #[serde(default = "default_edge_bloom_size")]
+    pub bloom_size: usize,
+}
+
+impl Default for EdgeCacheConfig {
+    fn default() -> Self {
+        Self {
+            hot_size: default_edge_hot_size(),
+            warm_size: default_edge_warm_size(),
+            bloom_size: default_edge_bloom_size(),
+        }
+    }
+}
+
+fn default_edge_hot_size() -> usize {
+    1_000_000
+}
+fn default_edge_warm_size() -> usize {
+    5_000_000
+}
+fn default_edge_bloom_size() -> usize {
+    100_000_000
 }
 
 #[derive(Deserialize, Clone, Debug)]

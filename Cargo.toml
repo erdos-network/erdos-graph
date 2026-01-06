@@ -26,6 +26,7 @@ tempfile = "3.8"
 tokio-cron-scheduler = "0.15.1"
 clap = { version = "4.5.53", features = ["derive"] }
 bloomfilter = "3.0.1"
+lru = "0.16.2"
 
 [dev-dependencies]
 tempfile = "3.8"

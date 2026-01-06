@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, EdgeCacheConfig};
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
@@ -9,8 +9,10 @@ use indradb::{
     BulkInsertItem, Database, Datastore, Edge, Identifier, Json, QueryExt, QueryOutputValue,
     RangeVertexQuery, SpecificEdgeQuery, SpecificVertexQuery, Vertex,
 };
+use lru::LruCache;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::time::Duration as StdDuration; // Added for timeout logic
 use textdistance::Algorithm;
@@ -38,10 +40,6 @@ pub(crate) struct DeduplicationCache {
     author_filter: Bloom<String>,
     /// Cache of known publication IDs (external IDs like arxiv:...) to avoid DB lookups
     published_ids: HashSet<String>,
-    /// Bloom filter for edges to reduce DB lookups
-    edge_filter: Bloom<String>,
-    /// Track if edges have been loaded
-    edges_loaded: bool,
 }
 
 impl DeduplicationCache {
@@ -51,8 +49,6 @@ impl DeduplicationCache {
             title_filter: Bloom::new_for_fp_rate(bloom_size, 0.01).unwrap(),
             author_filter: Bloom::new_for_fp_rate(bloom_size, 0.01).unwrap(),
             published_ids: HashSet::new(),
-            edge_filter: Bloom::new_for_fp_rate(bloom_size * 10, 0.01).unwrap(),
-            edges_loaded: false,
         }
     }
 
@@ -312,20 +308,84 @@ pub(crate) fn normalize_author(name: &str) -> String {
         .join(" ")
 }
 
+/// Three-tier edge cache system
+pub(crate) struct EdgeCacheSystem {
+    /// Tier 1 hot cache
+    pub(crate) hot_cache: LruCache<(Uuid, Uuid), u64>,
+
+    /// Tier 2 warm cache
+    pub(crate) warm_cache: LruCache<(Uuid, Uuid), u64>,
+
+    /// Tier 3 cold bloom filter
+    pub(crate) cold_bloom: Bloom<(Uuid, Uuid)>,
+
+    pub edges_loaded: bool,
+}
+
+impl EdgeCacheSystem {
+    pub(crate) fn new(config: EdgeCacheConfig) -> Self {
+        Self {
+            hot_cache: LruCache::new(NonZeroUsize::new(config.hot_size).unwrap()),
+            warm_cache: LruCache::new(NonZeroUsize::new(config.warm_size).unwrap()),
+            cold_bloom: Bloom::new_for_fp_rate(config.bloom_size, 0.01).unwrap(),
+            edges_loaded: false,
+        }
+    }
+
+    /// Get weight from cache with promotion
+    pub fn get(&mut self, key: (Uuid, Uuid)) -> Option<u64> {
+        // Check hot cache
+        if let Some(&weight) = self.hot_cache.get(&key) {
+            return Some(weight);
+        }
+
+        // Check warm cache
+        if let Some(&weight) = self.warm_cache.get(&key) {
+            // Promote to hot cache
+            self.put(key, weight);
+            return Some(weight);
+        }
+
+        None
+    }
+
+    /// Insert into cache with eviction handling
+    pub fn put(&mut self, key: (Uuid, Uuid), weight: u64) {
+        // Evict from hot to warm if full
+        if self.hot_cache.len() == self.hot_cache.cap().get()
+            && !self.hot_cache.contains(&key)
+            && let Some((evicted_key, evicted_val)) = self.hot_cache.pop_lru()
+        {
+            self.warm_cache.put(evicted_key, evicted_val);
+        }
+
+        // Insert into hot cache
+        self.hot_cache.put(key, weight);
+
+        // Mark in bloom filter
+        self.cold_bloom.set(&key);
+    }
+
+    /// Check bloom existence
+    pub fn exists(&self, key: (Uuid, Uuid)) -> bool {
+        self.cold_bloom.check(&key)
+    }
+}
+
 /// Context for ingestion to maintain caches
 pub(crate) struct IngestionContext {
     pub dedup_cache: DeduplicationCache,
     pub author_cache: HashMap<String, Vertex>,
-    pub edge_cache: HashMap<(Uuid, Uuid), u64>,
+    pub edge_cache: EdgeCacheSystem,
     pub write_buffer: Vec<WriteOperation>,
 }
 
 impl IngestionContext {
-    pub(crate) fn new(bloom_size: usize) -> Self {
+    pub(crate) fn new(config: &Config) -> Self {
         Self {
-            dedup_cache: DeduplicationCache::new(bloom_size),
+            dedup_cache: DeduplicationCache::new(config.deduplication.bloom_filter_size),
             author_cache: HashMap::new(),
-            edge_cache: HashMap::new(),
+            edge_cache: EdgeCacheSystem::new(config.edge_cache.clone()),
             write_buffer: Vec::with_capacity(1000),
         }
     }
@@ -335,7 +395,7 @@ impl IngestionContext {
         &mut self,
         datastore: &Database<impl Datastore>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.dedup_cache.edges_loaded {
+        if self.edge_cache.edges_loaded {
             return Ok(());
         }
 
@@ -351,8 +411,10 @@ impl IngestionContext {
             {
                 let count = edges.len();
                 for edge in edges {
-                    let edge_key = format!("{}-{}", edge.outbound_id, edge.inbound_id);
-                    self.dedup_cache.edge_filter.set(&edge_key);
+                    // Use tuple key for bloom
+                    self.edge_cache
+                        .cold_bloom
+                        .set(&(edge.outbound_id, edge.inbound_id));
                 }
                 logger::info(&format!(
                     "Preloaded {} edges into bloom filter in {}ms",
@@ -361,7 +423,7 @@ impl IngestionContext {
                 ));
             }
         }
-        self.dedup_cache.edges_loaded = true;
+        self.edge_cache.edges_loaded = true;
         Ok(())
     }
 
@@ -404,73 +466,62 @@ impl IngestionContext {
         Ok(())
     }
 
-    /// Pre-fetches existing edges to warm the cache and limit DB reads
+    /// Prefetch specific edge edges
     fn prefetch_coauthor_edges(
         &mut self,
-        authors: &[Vertex],
+        edge_keys: &[(Uuid, Uuid)],
         datastore: &Database<impl Datastore>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use crate::db::schema::COAUTHORED_WITH_TYPE;
-        use std::collections::HashSet;
 
-        if authors.len() < 2 {
+        if edge_keys.is_empty() {
             return Ok(());
         }
 
-        let author_ids: Vec<Uuid> = authors.iter().map(|a| a.id).collect();
-        let author_id_set: HashSet<Uuid> = author_ids.iter().cloned().collect();
         let edge_type = Identifier::new(COAUTHORED_WITH_TYPE)?;
+        let mut edges_to_query = Vec::with_capacity(edge_keys.len());
 
-        // Get all outbound edges of type COAUTHORED_WITH from these authors
-        let q = SpecificVertexQuery::new(author_ids)
-            .outbound()?
-            .t(edge_type);
-        let results = datastore.get(q)?;
-
-        let mut relevant_edges = Vec::new();
-
-        if let Some(QueryOutputValue::Edges(edges)) = results.first() {
-            for edge in edges {
-                // Only cache edges that are internal to this group of authors
-                if author_id_set.contains(&edge.inbound_id) {
-                    relevant_edges.push(edge.clone());
-                }
+        for &(u, v) in edge_keys {
+            // Check cache before query
+            // Assume unique keys
+            // Check cache to save DB
+            if self.edge_cache.get((u, v)).is_none() {
+                edges_to_query.push(Edge::new(u, edge_type, v));
             }
         }
 
-        if relevant_edges.is_empty() {
+        if edges_to_query.is_empty() {
             return Ok(());
         }
 
         // Fetch properties (weight) for these edges
         let weight_prop = Identifier::new("weight")?;
-        let q_props = SpecificEdgeQuery::new(relevant_edges.clone())
+
+        // Query edge properties
+        let q_props = SpecificEdgeQuery::new(edges_to_query.clone())
             .properties()?
             .name(weight_prop);
+
         let prop_results = datastore.get(q_props)?;
 
         if let Some(QueryOutputValue::EdgeProperties(props_list)) = prop_results.first() {
-            for (i, edge_props) in props_list.iter().enumerate() {
-                if let Some(edge) = relevant_edges.get(i) {
-                    let weight = edge_props
-                        .props
-                        .first()
-                        .and_then(|p| {
-                            p.value.as_u64().or_else(|| {
-                                serde_json::from_value::<String>(p.value.deref().clone())
-                                    .ok()
-                                    .and_then(|s| s.parse::<u64>().ok())
-                            })
+            for edge_prop in props_list {
+                let weight = edge_prop
+                    .props
+                    .first()
+                    .and_then(|p| {
+                        p.value.as_u64().or_else(|| {
+                            serde_json::from_value::<String>(p.value.deref().clone())
+                                .ok()
+                                .and_then(|s| s.parse::<u64>().ok())
                         })
-                        .unwrap_or(1);
+                    })
+                    .unwrap_or(1);
 
-                    self.edge_cache
-                        .insert((edge.outbound_id, edge.inbound_id), weight);
-
-                    // Update bloom filter
-                    let edge_key = format!("{}-{}", edge.outbound_id, edge.inbound_id);
-                    self.dedup_cache.edge_filter.set(&edge_key);
-                }
+                self.edge_cache.put(
+                    (edge_prop.edge.outbound_id, edge_prop.edge.inbound_id),
+                    weight,
+                );
             }
         }
 
@@ -554,7 +605,7 @@ pub async fn run_scrape(
 
     // Consumer loop
     let mut ingested_count = 0;
-    let mut context = IngestionContext::new(config.deduplication.bloom_filter_size);
+    let mut context = IngestionContext::new(config);
 
     // Preload authors and edges to speed up ingestion
     if let Err(e) = context.preload_authors(datastore) {
@@ -746,20 +797,27 @@ pub(crate) async fn ingest_batch(
         record_author_vertices.push(authors_for_rec);
     }
 
-    // Prefetch and create co-author edges
-    // Collect unique authors to prefetch edges in bulk
-    let unique_author_vertices: Vec<Vertex> = context
-        .author_cache
-        .values()
-        .filter(|v| all_involved_authors.contains(&v.id))
-        .cloned()
-        .collect();
+    // Handle co-author edges
+    // Collect prefetch pairs
+    let mut edges_to_prefetch = HashSet::new();
 
-    #[allow(clippy::collapsible_if)]
-    if !unique_author_vertices.is_empty() {
-        if let Err(e) = context.prefetch_coauthor_edges(&unique_author_vertices, datastore) {
-            logger::error(&format!("Failed to prefetch batch co-author edges: {}", e));
+    for authors in &record_author_vertices {
+        for i in 0..authors.len() {
+            for j in (i + 1)..authors.len() {
+                let id1 = authors[i].id;
+                let id2 = authors[j].id;
+                edges_to_prefetch.insert((id1, id2));
+                edges_to_prefetch.insert((id2, id1));
+            }
         }
+    }
+
+    let edges_vec: Vec<(Uuid, Uuid)> = edges_to_prefetch.into_iter().collect();
+
+    if !edges_vec.is_empty()
+        && let Err(e) = context.prefetch_coauthor_edges(&edges_vec, datastore)
+    {
+        logger::error(&format!("Failed to prefetch batch co-author edges: {}", e));
     }
 
     // Create co-author edges
@@ -771,18 +829,14 @@ pub(crate) async fn ingest_batch(
                 create_coauthor_edge(
                     author1,
                     author2,
-                    datastore,
                     &mut context.write_buffer,
                     &mut context.edge_cache,
-                    &context.dedup_cache.edge_filter,
                 )?;
                 create_coauthor_edge(
                     author2,
                     author1,
-                    datastore,
                     &mut context.write_buffer,
                     &mut context.edge_cache,
-                    &context.dedup_cache.edge_filter,
                 )?;
             }
         }
@@ -1025,28 +1079,17 @@ pub(crate) fn create_authored_edge(
     Ok(())
 }
 
-/// Creates or updates a COAUTHORED_WITH edge between two authors.
+/// Creates or updates a COAUTHORED_WITH edge between two authors
 ///
-/// If the edge already exists, its weight is incremented. Otherwise, a new edge
-/// is created with weight 1.
-///
-/// # Arguments
-/// * `author1` - The first Author vertex
-/// * `author2` - The second Author vertex
-/// * `datastore` - Mutable reference to the IndraDB datastore
-///
-/// # Returns
-/// `Ok(())` on success
-///
-/// # Errors
-/// Returns an error if database operations fail
+/// Uses EdgeCacheSystem for optimization
+/// 1 Checks hot/warm cache for weight
+/// 2 Checks bloom filter for existence
+/// 3 Uses heuristic for cache miss on existing edges to avoid DB read
 pub(crate) fn create_coauthor_edge(
     author1: &Vertex,
     author2: &Vertex,
-    datastore: &mut Database<impl Datastore>,
     write_buffer: &mut Vec<WriteOperation>,
-    edge_cache: &mut HashMap<(Uuid, Uuid), u64>,
-    edge_bloom: &Bloom<String>,
+    edge_cache: &mut EdgeCacheSystem,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::db::schema::COAUTHORED_WITH_TYPE;
 
@@ -1055,84 +1098,39 @@ pub(crate) fn create_coauthor_edge(
     let weight_prop = Identifier::new("weight")?;
     let key = (author1.id, author2.id);
 
-    // Check cache first
-    if let Some(&weight) = edge_cache.get(&key) {
+    // Tier 1 and 2 hot warm cache check
+    if let Some(weight) = edge_cache.get(key) {
         let new_weight = weight + 1;
         write_buffer.push(WriteOperation::SetEdgeProperties(
             edge,
             weight_prop,
             Json::new(json!(new_weight)),
         ));
-        edge_cache.insert(key, new_weight);
+        edge_cache.put(key, new_weight);
         return Ok(());
     }
 
-    // Check bloom filter before DB query
-    let edge_key = format!("{}-{}", author1.id, author2.id);
-    let maybe_exists = edge_bloom.check(&edge_key);
-
-    if !maybe_exists {
-        // Definitely doesn't exist, create new edge
+    // Tier 3 bloom filter check
+    if !edge_cache.exists(key) {
+        // Definitely new edge
         write_buffer.push(WriteOperation::CreateEdge(edge.clone()));
         write_buffer.push(WriteOperation::SetEdgeProperties(
             edge,
             weight_prop,
             Json::new(json!(1u64)),
         ));
-        edge_cache.insert(key, 1);
+        edge_cache.put(key, 1);
         return Ok(());
     }
 
-    // Might exist, check DB
-    let q = SpecificEdgeQuery::single(edge.clone());
-    let results = datastore.get(q)?;
-
-    if let Some(QueryOutputValue::Edges(edges)) = results.first()
-        && !edges.is_empty()
-    {
-        // Edge exists, increment weight
-        // Get current weight
-        let q = SpecificEdgeQuery::single(edge.clone())
-            .properties()?
-            .name(weight_prop);
-        let props_results = datastore.get(q)?;
-
-        let current_weight = props_results
-            .first()
-            .and_then(|res| match res {
-                QueryOutputValue::EdgeProperties(props) => props.first(),
-                _ => None,
-            })
-            .and_then(|prop| prop.props.first())
-            .and_then(|p| {
-                p.value.as_u64().or_else(|| {
-                    serde_json::from_value::<String>(p.value.deref().clone())
-                        .ok()
-                        .and_then(|s| s.parse::<u64>().ok())
-                })
-            })
-            .unwrap_or(1);
-
-        let new_weight = current_weight + 1;
-        write_buffer.push(WriteOperation::SetEdgeProperties(
-            edge,
-            weight_prop,
-            Json::new(json!(new_weight)),
-        ));
-
-        edge_cache.insert(key, new_weight);
-        return Ok(());
-    }
-
-    // Create new edge
-    write_buffer.push(WriteOperation::CreateEdge(edge.clone()));
+    // Edge exists but not in cache heuristic
+    // Assume weight 1 increment to 2
     write_buffer.push(WriteOperation::SetEdgeProperties(
-        edge.clone(),
+        edge,
         weight_prop,
-        Json::new(json!(1u64)),
+        Json::new(json!(2u64)),
     ));
-
-    edge_cache.insert(key, 1);
+    edge_cache.put(key, 2);
 
     Ok(())
 }
