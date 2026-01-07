@@ -1,2 +1,2 @@
-createSrcSidebar('[["erdos_graph",["",[["db",[],["client.rs","ingestion.rs","mod.rs","schema.rs"]],["logger",[],["core.rs","mod.rs"]],["schedulers",[],["mod.rs","scrape_benchmark.rs","scrape_full_refresh.rs","scrape_weekly_update.rs"]],["scrapers",[],["arxiv.rs","dblp.rs","mod.rs","scraper.rs","scraping_orchestrator.rs","zbmath.rs"]],["utilities",[],["mod.rs","thread_safe_queue.rs"]]],["config.rs","lib.rs"]]]]');
-//{"start":19,"fragment_lengths":[393]}
+createSrcSidebar('[["erdos_graph",["",[["db",[],["client.rs","ingestion.rs","mod.rs","schema.rs"]],["logger",[],["core.rs","mod.rs"]],["schedulers",[],["mod.rs","scrape_benchmark.rs","scrape_full_refresh.rs","scrape_weekly_update.rs"]],["scrapers",[],["arxiv.rs","cache.rs","dblp.rs","ingestion_utils.rs","mod.rs","scraper.rs","scraping_orchestrator.rs","zbmath.rs"]],["utilities",[],["mod.rs","thread_safe_queue.rs"]]],["config.rs","lib.rs"]]]]');
+//{"start":19,"fragment_lengths":[425]}

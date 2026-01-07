@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["arxiv","dblp","scraper","scraping_orchestrator","zbmath"]};
+window.SIDEBAR_ITEMS = {"mod":["arxiv","cache","dblp","ingestion_utils","scraper","scraping_orchestrator","zbmath"]};
