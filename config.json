@@ -26,6 +26,11 @@
         "author_similarity_threshold": 0.5,
         "bloom_filter_size": 5000000
     },
+    "edge_cache": {
+        "hot_size": 1000000,
+        "warm_size": 5000000,
+        "bloom_size": 100000000
+    },
     "heartbeat_timeout_s": 30,
     "polling_interval_ms": 100
 }

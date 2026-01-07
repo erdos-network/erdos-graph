@@ -58,6 +58,7 @@ mod tests {
                 author_similarity_threshold: 0.5,
                 bloom_filter_size: 100,
             },
+            edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
         };
@@ -115,6 +116,7 @@ mod tests {
                 author_similarity_threshold: 0.5,
                 bloom_filter_size: 100,
             },
+            edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
         };
@@ -177,6 +179,7 @@ mod tests {
                 author_similarity_threshold: 0.5,
                 bloom_filter_size: 100,
             },
+            edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
         };
@@ -236,6 +239,7 @@ mod tests {
                 author_similarity_threshold: 0.5,
                 bloom_filter_size: 100,
             },
+            edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
         };
@@ -321,6 +325,7 @@ mod tests {
                 author_similarity_threshold: 0.5,
                 bloom_filter_size: 100,
             },
+            edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
         };
@@ -373,6 +378,7 @@ mod tests {
                 author_similarity_threshold: 0.5,
                 bloom_filter_size: 100,
             },
+            edge_cache: Default::default(),
             heartbeat_timeout_s: 120,
             polling_interval_ms: 100,
         };
@@ -429,6 +435,7 @@ mod tests {
                 author_similarity_threshold: 0.5,
                 bloom_filter_size: 100,
             },
+            edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
         };
