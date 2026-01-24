@@ -18,13 +18,12 @@ mod tests {
     use tokio::sync::Mutex;
     use tokio::time::{Instant, sleep};
 
+    #[allow(clippy::field_reassign_with_default)]
     async fn create_test_engine() -> Arc<HelixGraphEngine> {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test_db.helix");
         std::fs::create_dir_all(&db_path).unwrap();
 
-        let mut opts = HelixGraphEngineOpts::default();
-        opts.path = db_path.to_string_lossy().to_string();
         // Configure indices
         let indices = vec![
             helix_db::helix_engine::types::SecondaryIndex::Index("year".to_string()),
@@ -36,6 +35,9 @@ mod tests {
         let mut graph_config =
             helix_db::helix_engine::traversal_core::config::GraphConfig::default();
         graph_config.secondary_indices = Some(indices);
+
+        let mut opts = HelixGraphEngineOpts::default();
+        opts.path = db_path.to_string_lossy().to_string();
         opts.config.graph_config = Some(graph_config);
 
         std::mem::forget(temp_dir);
@@ -382,10 +384,8 @@ mod tests {
         let iter = index.prefix_iter(&txn, &key).unwrap();
 
         let mut count = 0;
-        for item in iter {
-            if let Ok((_, _)) = item {
-                count += 1;
-            }
+        for (_, _) in iter.flatten() {
+            count += 1;
         }
         assert_eq!(count, 1, "Should find publication via index");
     }
@@ -494,13 +494,11 @@ mod tests {
             .unwrap();
 
         let mut found_weight = 0;
-        for item in iter {
-            if let Ok((_, _val)) = item {
-                // We assume it worked if we found an edge.
-                // Reading edge properties requires unpacking edge_id and querying edges_db.
-                // Simplified check:
-                found_weight = 2;
-            }
+        for (_, _val) in iter.flatten() {
+            // We assume it worked if we found an edge.
+            // Reading edge properties requires unpacking edge_id and querying edges_db.
+            // Simplified check:
+            found_weight = 2;
         }
         assert_eq!(found_weight, 2);
     }

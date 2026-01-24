@@ -10,6 +10,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[allow(clippy::field_reassign_with_default)]
     async fn test_scraping_flow_arxiv() -> Result<(), Box<dyn std::error::Error>> {
         // Create temporary directory for the database
         let temp_dir = TempDir::new()?;
@@ -58,6 +59,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::field_reassign_with_default)]
     async fn test_scraping_flow_dblp() -> Result<(), Box<dyn std::error::Error>> {
         // Create a temporary database
         let temp_dir = TempDir::new()?;

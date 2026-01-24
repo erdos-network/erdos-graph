@@ -102,23 +102,14 @@ impl Default for IngestionConfig {
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, Default)]
 pub struct ScraperConfig {
+    #[serde(default)]
     pub enabled: Vec<String>,
     #[serde(default)]
     pub dblp: DblpSourceConfig,
     #[serde(default)]
     pub arxiv: ArxivSourceConfig,
-}
-
-impl Default for ScraperConfig {
-    fn default() -> Self {
-        Self {
-            enabled: vec![],
-            dblp: DblpSourceConfig::default(),
-            arxiv: ArxivSourceConfig::default(),
-        }
-    }
 }
 
 #[derive(Deserialize, Clone, Debug)]

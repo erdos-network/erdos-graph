@@ -15,6 +15,7 @@ use tempfile::TempDir;
 mod tests {
     use super::*;
 
+    #[allow(clippy::field_reassign_with_default)]
     async fn create_test_datastore() -> Arc<HelixGraphEngine> {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test_db.helix");

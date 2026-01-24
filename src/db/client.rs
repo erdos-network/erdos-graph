@@ -7,10 +7,8 @@ use std::sync::Arc;
 
 /// Initialize HelixDB database
 #[coverage(off)]
+#[allow(clippy::field_reassign_with_default)]
 pub fn init_datastore(path: &Path) -> Result<Arc<HelixGraphEngine>, Box<dyn std::error::Error>> {
-    let mut opts = HelixGraphEngineOpts::default();
-    opts.path = path.to_string_lossy().to_string();
-
     // Configure secondary indices
     let indices = vec![
         SecondaryIndex::Index("year".to_string()),
@@ -21,6 +19,9 @@ pub fn init_datastore(path: &Path) -> Result<Arc<HelixGraphEngine>, Box<dyn std:
 
     let mut graph_config = GraphConfig::default();
     graph_config.secondary_indices = Some(indices);
+
+    let mut opts = HelixGraphEngineOpts::default();
+    opts.path = path.to_string_lossy().to_string();
     opts.config.graph_config = Some(graph_config);
     opts.version_info = VersionInfo::default();
 

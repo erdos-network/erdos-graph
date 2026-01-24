@@ -84,37 +84,31 @@ impl IngestionContext {
                 let out_key = HelixGraphStorage::out_edge_key(&u, &label_hash);
 
                 if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
-                    for item in iter {
-                        if let Ok((_, val_bytes)) = item {
-                            if val_bytes.len() >= 32 {
-                                let mut to_node_bytes = [0u8; 16];
-                                to_node_bytes.copy_from_slice(&val_bytes[16..32]);
-                                let to_node_id = u128::from_be_bytes(to_node_bytes);
+                    for (_, val_bytes) in iter.flatten() {
+                        if val_bytes.len() >= 32 {
+                            let mut to_node_bytes = [0u8; 16];
+                            to_node_bytes.copy_from_slice(&val_bytes[16..32]);
+                            let to_node_id = u128::from_be_bytes(to_node_bytes);
 
-                                if to_node_id == v {
-                                    let mut edge_id_bytes = [0u8; 16];
-                                    edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
-                                    let edge_id = u128::from_be_bytes(edge_id_bytes);
+                            if to_node_id == v {
+                                let mut edge_id_bytes = [0u8; 16];
+                                edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
+                                let edge_id = u128::from_be_bytes(edge_id_bytes);
 
-                                    if let Ok(Some(edge_bytes)) =
-                                        engine.storage.edges_db.get(&txn, &edge_id)
-                                    {
-                                        if let Ok(edge) =
-                                            Edge::from_bincode_bytes(edge_id, &edge_bytes, &arena)
-                                        {
-                                            if let Some(props) = edge.properties {
-                                                if let Some(w_val) = props.get("weight") {
-                                                    let weight = match w_val {
-                                                        HelixValue::U64(w) => *w,
-                                                        HelixValue::I64(w) => *w as u64,
-                                                        HelixValue::F64(w) => *w as u64,
-                                                        _ => 1,
-                                                    };
-                                                    self.edge_cache.put((u, v), weight);
-                                                }
-                                            }
-                                        }
-                                    }
+                                if let Ok(Some(edge_bytes)) =
+                                    engine.storage.edges_db.get(&txn, &edge_id)
+                                    && let Ok(edge) =
+                                        Edge::from_bincode_bytes(edge_id, edge_bytes, &arena)
+                                    && let Some(props) = edge.properties
+                                    && let Some(w_val) = props.get("weight")
+                                {
+                                    let weight = match w_val {
+                                        HelixValue::U64(w) => *w,
+                                        HelixValue::I64(w) => *w as u64,
+                                        HelixValue::F64(w) => *w as u64,
+                                        _ => 1,
+                                    };
+                                    self.edge_cache.put((u, v), weight);
                                 }
                             }
                         }

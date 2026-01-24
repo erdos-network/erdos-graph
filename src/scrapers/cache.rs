@@ -120,66 +120,58 @@ impl DeduplicationCache {
 
         if let Some((year_index_db, _)) = engine.storage.secondary_indices.get("year") {
             let year_str = record.year.to_string();
-            if let Ok(key_bytes) = bincode::serialize(&Value::String(year_str)) {
-                if let Ok(iter) = year_index_db.prefix_iter(&txn, &key_bytes) {
-                    let cosine = Cosine::default();
-                    let record_title_lower = record.title.to_lowercase();
+            if let Ok(key_bytes) = bincode::serialize(&Value::String(year_str))
+                && let Ok(iter) = year_index_db.prefix_iter(&txn, &key_bytes)
+            {
+                let cosine = Cosine::default();
+                let record_title_lower = record.title.to_lowercase();
 
-                    for item in iter {
-                        if let Ok((_, node_id)) = item {
-                            if let Ok(Some(node_bytes)) =
-                                engine.storage.nodes_db.get(&txn, &node_id)
-                            {
-                                if let Ok(node) =
-                                    Node::from_bincode_bytes(node_id, &node_bytes, &arena)
-                                {
-                                    if node.label != crate::db::schema::PUBLICATION_TYPE {
-                                        continue;
-                                    }
+                for (_, node_id) in iter.flatten() {
+                    if let Ok(Some(node_bytes)) = engine.storage.nodes_db.get(&txn, &node_id)
+                        && let Ok(node) = Node::from_bincode_bytes(node_id, node_bytes, &arena)
+                    {
+                        if node.label != crate::db::schema::PUBLICATION_TYPE {
+                            continue;
+                        }
 
-                                    if let Some(Value::String(title)) = node.get_property("title") {
-                                        if record_title_norm == normalize_title(title) {
-                                            if check_authors_similarity(
-                                                &node.id,
-                                                &record.authors,
-                                                engine,
-                                                &txn,
-                                                config.deduplication.author_similarity_threshold,
-                                            ) {
-                                                logger::debug(&format!(
-                                                    "Cache hit (exact title) for '{}' - took {}ms",
-                                                    record.title,
-                                                    start.elapsed().as_millis()
-                                                ));
-                                                return true;
-                                            }
-                                            continue;
-                                        }
-
-                                        let db_title_lower = title.to_lowercase();
-                                        let similarity = cosine
-                                            .for_str(&record_title_lower, &db_title_lower)
-                                            .nval();
-
-                                        if similarity
-                                            >= config.deduplication.title_similarity_threshold
-                                            && check_authors_similarity(
-                                                &node.id,
-                                                &record.authors,
-                                                engine,
-                                                &txn,
-                                                config.deduplication.author_similarity_threshold,
-                                            )
-                                        {
-                                            logger::debug(&format!(
-                                                "Cache hit (similarity) for '{}' - took {}ms",
-                                                record.title,
-                                                find_elapsed_millis(start)
-                                            ));
-                                            return true;
-                                        }
-                                    }
+                        if let Some(Value::String(title)) = node.get_property("title") {
+                            if record_title_norm == normalize_title(title) {
+                                if check_authors_similarity(
+                                    &node.id,
+                                    &record.authors,
+                                    engine,
+                                    &txn,
+                                    config.deduplication.author_similarity_threshold,
+                                ) {
+                                    logger::debug(&format!(
+                                        "Cache hit (exact title) for '{}' - took {}ms",
+                                        record.title,
+                                        start.elapsed().as_millis()
+                                    ));
+                                    return true;
                                 }
+                                continue;
+                            }
+
+                            let db_title_lower = title.to_lowercase();
+                            let similarity =
+                                cosine.for_str(&record_title_lower, &db_title_lower).nval();
+
+                            if similarity >= config.deduplication.title_similarity_threshold
+                                && check_authors_similarity(
+                                    &node.id,
+                                    &record.authors,
+                                    engine,
+                                    &txn,
+                                    config.deduplication.author_similarity_threshold,
+                                )
+                            {
+                                logger::debug(&format!(
+                                    "Cache hit (similarity) for '{}' - took {}ms",
+                                    record.title,
+                                    find_elapsed_millis(start)
+                                ));
+                                return true;
                             }
                         }
                     }
@@ -210,87 +202,64 @@ impl DeduplicationCache {
 
         if let Some((year_index_db, _)) = engine.storage.secondary_indices.get("year") {
             let year_str = year.to_string();
-            if let Ok(key_bytes) = bincode::serialize(&Value::String(year_str)) {
-                if let Ok(iter) = year_index_db.prefix_iter(&txn, &key_bytes) {
-                    for item in iter {
-                        if let Ok((_, node_id)) = item {
-                            if let Ok(Some(node_bytes)) =
-                                engine.storage.nodes_db.get(&txn, &node_id)
-                            {
-                                if let Ok(node) =
-                                    Node::from_bincode_bytes(node_id, &node_bytes, &arena)
-                                {
-                                    if node.label != crate::db::schema::PUBLICATION_TYPE {
-                                        continue;
-                                    }
+            if let Ok(key_bytes) = bincode::serialize(&Value::String(year_str))
+                && let Ok(iter) = year_index_db.prefix_iter(&txn, &key_bytes)
+            {
+                for (_, node_id) in iter.flatten() {
+                    if let Ok(Some(node_bytes)) = engine.storage.nodes_db.get(&txn, &node_id)
+                        && let Ok(node) = Node::from_bincode_bytes(node_id, node_bytes, &arena)
+                    {
+                        if node.label != crate::db::schema::PUBLICATION_TYPE {
+                            continue;
+                        }
 
-                                    let mut title_opt = None;
-                                    let mut id_opt = None;
+                        let mut title_opt = None;
+                        let mut id_opt = None;
 
-                                    if let Some(Value::String(t)) = node.get_property("title") {
-                                        title_opt = Some(t);
-                                    }
-                                    if let Some(Value::String(pid)) =
-                                        node.get_property("publication_id")
+                        if let Some(Value::String(t)) = node.get_property("title") {
+                            title_opt = Some(t);
+                        }
+                        if let Some(Value::String(pid)) = node.get_property("publication_id") {
+                            id_opt = Some(pid);
+                        }
+
+                        if let Some(title) = title_opt {
+                            let norm = normalize_title(title);
+                            self.title_filter.set(&norm);
+                            count += 1;
+                        }
+                        if let Some(pid) = id_opt {
+                            self.published_ids.insert(pid.to_string());
+                        }
+
+                        let label_hash = helix_db::utils::label_hash::hash_label(
+                            crate::db::schema::AUTHORED_TYPE,
+                            None,
+                        );
+                        let in_key = HelixGraphStorage::in_edge_key(&node.id, &label_hash);
+
+                        if let Ok(iter) = engine.storage.in_edges_db.prefix_iter(&txn, &in_key) {
+                            for (key, val_bytes) in iter.flatten() {
+                                // Check if the key still matches our prefix
+                                if !key.starts_with(&in_key) {
+                                    break;
+                                }
+                                if val_bytes.len() >= 32 {
+                                    let mut author_id_bytes = [0u8; 16];
+                                    author_id_bytes.copy_from_slice(&val_bytes[16..32]);
+                                    let author_id = u128::from_be_bytes(author_id_bytes);
+
+                                    if let Ok(Some(author_bytes)) =
+                                        engine.storage.nodes_db.get(&txn, &author_id)
+                                        && let Ok(author_node) = Node::from_bincode_bytes(
+                                            author_id,
+                                            author_bytes,
+                                            &arena,
+                                        )
+                                        && let Some(Value::String(name)) =
+                                            author_node.get_property("name")
                                     {
-                                        id_opt = Some(pid);
-                                    }
-
-                                    if let Some(title) = title_opt {
-                                        let norm = normalize_title(title);
-                                        self.title_filter.set(&norm);
-                                        count += 1;
-                                    }
-                                    if let Some(pid) = id_opt {
-                                        self.published_ids.insert(pid.to_string());
-                                    }
-
-                                    let label_hash = helix_db::utils::label_hash::hash_label(
-                                        crate::db::schema::AUTHORED_TYPE,
-                                        None,
-                                    );
-                                    let in_key =
-                                        HelixGraphStorage::in_edge_key(&node.id, &label_hash);
-
-                                    if let Ok(iter) =
-                                        engine.storage.in_edges_db.prefix_iter(&txn, &in_key)
-                                    {
-                                        for item in iter {
-                                            if let Ok((key, val_bytes)) = item {
-                                                // Check if the key still matches our prefix
-                                                if !key.starts_with(&in_key) {
-                                                    break;
-                                                }
-                                                if val_bytes.len() >= 32 {
-                                                    let mut author_id_bytes = [0u8; 16];
-                                                    author_id_bytes
-                                                        .copy_from_slice(&val_bytes[16..32]);
-                                                    let author_id =
-                                                        u128::from_be_bytes(author_id_bytes);
-
-                                                    if let Ok(Some(author_bytes)) = engine
-                                                        .storage
-                                                        .nodes_db
-                                                        .get(&txn, &author_id)
-                                                    {
-                                                        if let Ok(author_node) =
-                                                            Node::from_bincode_bytes(
-                                                                author_id,
-                                                                &author_bytes,
-                                                                &arena,
-                                                            )
-                                                        {
-                                                            if let Some(Value::String(name)) =
-                                                                author_node.get_property("name")
-                                                            {
-                                                                self.author_filter
-                                                                    .set(&normalize_title(name));
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        self.author_filter.set(&normalize_title(name));
                                     }
                                 }
                             }
@@ -347,11 +316,11 @@ fn find_elapsed_millis(start: Instant) -> u128 {
 }
 
 /// Helper to check author similarity
-fn check_authors_similarity<'txn>(
+fn check_authors_similarity(
     pub_node_id: &u128,
     authors: &[String],
     engine: &Arc<HelixGraphEngine>,
-    txn: &'txn heed3::RoTxn,
+    txn: &heed3::RoTxn,
     threshold: f64,
 ) -> bool {
     let arena = Bump::new();
@@ -362,26 +331,22 @@ fn check_authors_similarity<'txn>(
     let mut db_authors = Vec::new();
 
     if let Ok(iter) = engine.storage.in_edges_db.prefix_iter(txn, &in_key) {
-        for item in iter {
-            if let Ok((key, val_bytes)) = item {
-                // Check if the key still matches our prefix
-                if !key.starts_with(&in_key) {
-                    break;
-                }
-                if val_bytes.len() >= 32 {
-                    let mut author_id_bytes = [0u8; 16];
-                    author_id_bytes.copy_from_slice(&val_bytes[16..32]);
-                    let author_id = u128::from_be_bytes(author_id_bytes);
+        for (key, val_bytes) in iter.flatten() {
+            // Check if the key still matches our prefix
+            if !key.starts_with(&in_key) {
+                break;
+            }
+            if val_bytes.len() >= 32 {
+                let mut author_id_bytes = [0u8; 16];
+                author_id_bytes.copy_from_slice(&val_bytes[16..32]);
+                let author_id = u128::from_be_bytes(author_id_bytes);
 
-                    if let Ok(Some(author_bytes)) = engine.storage.nodes_db.get(txn, &author_id) {
-                        if let Ok(author_node) =
-                            Node::from_bincode_bytes(author_id, &author_bytes, &arena)
-                        {
-                            if let Some(Value::String(name)) = author_node.get_property("name") {
-                                db_authors.push(name.to_string());
-                            }
-                        }
-                    }
+                if let Ok(Some(author_bytes)) = engine.storage.nodes_db.get(txn, &author_id)
+                    && let Ok(author_node) =
+                        Node::from_bincode_bytes(author_id, author_bytes, &arena)
+                    && let Some(Value::String(name)) = author_node.get_property("name")
+                {
+                    db_authors.push(name.to_string());
                 }
             }
         }
