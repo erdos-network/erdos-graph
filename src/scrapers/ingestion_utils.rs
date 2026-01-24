@@ -220,13 +220,15 @@ pub(crate) fn flush_buffer(
             WriteOperation::CreateVertex(v) => {
                 let node = to_helix_node(&v, &arena);
                 if let Ok(bytes) = bincode::serialize(&node) {
-                     engine.storage.nodes_db.put_with_flags(&mut wtxn, PutFlags::APPEND, &node.id, &bytes)?;
+                     // Use empty flags to allow unsorted inserts (LMDB handles sorting)
+                     engine.storage.nodes_db.put_with_flags(&mut wtxn, PutFlags::empty(), &node.id, &bytes)?;
                      
                      for (idx_name, (db, _)) in &engine.storage.secondary_indices {
                          if let Some(val) = node.get_property(idx_name) {
                              let val_str = value_to_string(val);
                              if let Ok(key_bytes) = bincode::serialize(&HelixValue::String(val_str)) {
-                                  db.put_with_flags(&mut wtxn, PutFlags::APPEND_DUP, &key_bytes, &node.id)?;
+                                  // For secondary indices (DUP_SORT), empty flags adds to the set
+                                  db.put_with_flags(&mut wtxn, PutFlags::empty(), &key_bytes, &node.id)?;
                              }
                          }
                      }
@@ -237,20 +239,20 @@ pub(crate) fn flush_buffer(
                 let edge = to_helix_edge(&e, edge_id, &arena);
                 
                 if let Ok(bytes) = bincode::serialize(&edge) {
-                    engine.storage.edges_db.put_with_flags(&mut wtxn, PutFlags::APPEND, &edge.id, &bytes)?;
+                    engine.storage.edges_db.put_with_flags(&mut wtxn, PutFlags::empty(), &edge.id, &bytes)?;
                     
                     let label_hash = helix_db::utils::label_hash::hash_label(edge.label, None);
                     
                     engine.storage.out_edges_db.put_with_flags(
                         &mut wtxn,
-                        PutFlags::APPEND_DUP,
+                        PutFlags::empty(),
                         &HelixGraphStorage::out_edge_key(&edge.from_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.to_node)
                     )?;
                     
                     engine.storage.in_edges_db.put_with_flags(
                         &mut wtxn,
-                        PutFlags::APPEND_DUP,
+                        PutFlags::empty(),
                         &HelixGraphStorage::in_edge_key(&edge.to_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.from_node)
                     )?;
@@ -480,4 +482,15 @@ pub(crate) fn create_coauthor_edge(
     add_ops(1)?;
 
     Ok(())
+}
+
+/// Helper to check if publication exists in DB (using Bloom filter as first line of defense)
+#[allow(dead_code)]
+pub fn publication_exists(
+    record: &PublicationRecord,
+    engine: &Arc<HelixGraphEngine>,
+    config: &Config,
+    cache: &mut DeduplicationCache,
+) -> bool {
+    cache.check_exists_and_cache(record, engine, config)
 }

@@ -14,12 +14,35 @@ pub struct Config {
     pub polling_interval_ms: u64,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            scrapers: ScraperConfig::default(),
+            ingestion: IngestionConfig::default(),
+            deduplication: DeduplicationConfig::default(),
+            edge_cache: EdgeCacheConfig::default(),
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct DeduplicationConfig {
     pub title_similarity_threshold: f64,
     pub author_similarity_threshold: f64,
     #[serde(default = "default_bloom_filter_size")]
     pub bloom_filter_size: usize,
+}
+
+impl Default for DeduplicationConfig {
+    fn default() -> Self {
+        Self {
+            title_similarity_threshold: 0.9,
+            author_similarity_threshold: 0.5,
+            bloom_filter_size: default_bloom_filter_size(),
+        }
+    }
 }
 
 fn default_bloom_filter_size() -> usize {
@@ -68,6 +91,17 @@ pub struct IngestionConfig {
     pub checkpoint_dir: Option<String>,
 }
 
+impl Default for IngestionConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size_days: 1,
+            initial_start_date: "1932-01-01T00:00:00Z".to_string(),
+            weekly_days: 7,
+            checkpoint_dir: None,
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct ScraperConfig {
     pub enabled: Vec<String>,
@@ -75,6 +109,16 @@ pub struct ScraperConfig {
     pub dblp: DblpSourceConfig,
     #[serde(default)]
     pub arxiv: ArxivSourceConfig,
+}
+
+impl Default for ScraperConfig {
+    fn default() -> Self {
+        Self {
+            enabled: vec![],
+            dblp: DblpSourceConfig::default(),
+            arxiv: ArxivSourceConfig::default(),
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Debug)]

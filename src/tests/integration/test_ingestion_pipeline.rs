@@ -4,33 +4,42 @@
 //! through multiprocessed scraping, checkpointing, chunking, and database ingestion.
 
 use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
-use crate::db::client::init_datastore;
 use crate::db::ingestion::{get_checkpoint, orchestrate_scraping_and_ingestion, set_checkpoint};
 use chrono::{Duration, Utc};
 use tempfile::TempDir;
+use helix_db::helix_engine::traversal_core::HelixGraphEngineOpts;
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
+use std::sync::Arc;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Test initial ingestion mode with ArXiv source.
-    ///
-    /// This test verifies:
-    /// - orchestrate_scraping_and_ingestion works end-to-end
-    /// - Chunking happens correctly
-    /// - Checkpoints are created after processing
-    /// - Multiple sources can be processed in parallel
+    async fn create_test_datastore() -> Arc<HelixGraphEngine> {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db.helix");
+        std::fs::create_dir_all(&db_path).unwrap();
+        
+        // Initialize Helix datastore
+        let mut opts = HelixGraphEngineOpts::default();
+        opts.path = db_path.to_string_lossy().to_string();
+        
+        // We leak the temp_dir to keep the files for the duration of the test logic
+        // In a real test we might want better cleanup, but tempfile cleans up when the object drops.
+        // Here we just want the path.
+        std::mem::forget(temp_dir); 
+
+        Arc::new(HelixGraphEngine::new(opts).unwrap())
+    }
+
     #[tokio::test]
     async fn test_full_pipeline_initial_mode_arxiv() -> Result<(), Box<dyn std::error::Error>> {
-        // Create temporary directory for the database and checkpoints
+        // Create temporary directory for checkpoints
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_initial_arxiv.rocksdb");
         let checkpoint_dir = temp_dir.path().join("checkpoints");
         std::fs::create_dir_all(&checkpoint_dir)?;
 
-        // Initialize RocksDB datastore
-        // Initialize RocksDB datastore
-        let mut database = init_datastore(&db_path)?;
+        let database = create_test_datastore().await;
 
         // Speed up tests by disabling scraper delays
         unsafe {
@@ -40,7 +49,6 @@ mod tests {
 
         let sources = vec!["arxiv".to_string()];
 
-        // Config setup with small chunk size for testing
         let config = Config {
             scrapers: ScraperConfig {
                 enabled: sources.clone(),
@@ -48,7 +56,7 @@ mod tests {
                 arxiv: Default::default(),
             },
             ingestion: IngestionConfig {
-                chunk_size_days: 1, // Small chunks to test chunking logic
+                chunk_size_days: 1, 
                 initial_start_date: (Utc::now() - Duration::days(2)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
@@ -63,9 +71,8 @@ mod tests {
             polling_interval_ms: 100,
         };
 
-        // Run initial ingestion (will use configured start date since no checkpoint exists)
         let result =
-            orchestrate_scraping_and_ingestion("initial", sources.clone(), &mut database, &config)
+            orchestrate_scraping_and_ingestion("initial", sources.clone(), database, &config)
                 .await;
 
         assert!(
@@ -77,22 +84,14 @@ mod tests {
         Ok(())
     }
 
-    /// Test weekly mode with checkpoint resumption for DBLP.
-    ///
-    /// This test verifies:
-    /// - Weekly mode uses checkpoints if they exist
-    /// - Checkpoint-based resumption works correctly
-    /// - Small incremental updates work
     #[tokio::test]
     async fn test_full_pipeline_weekly_mode_dblp() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_weekly_dblp.rocksdb");
         let checkpoint_dir = temp_dir.path().join("checkpoints");
         std::fs::create_dir_all(&checkpoint_dir)?;
 
-        let mut database = init_datastore(&db_path)?;
+        let database = create_test_datastore().await;
 
-        // Speed up tests by disabling scraper delays
         unsafe {
             std::env::set_var("DBLP_DELAY_MS", "0");
         }
@@ -121,13 +120,11 @@ mod tests {
             polling_interval_ms: 100,
         };
 
-        // Set a checkpoint from 1 hour ago to keep within current year (avoiding large prev year scrape)
         let checkpoint_date = Utc::now() - Duration::hours(1);
         set_checkpoint("dblp", checkpoint_date, &checkpoint_dir)?;
 
-        // Run weekly ingestion - should scrape from checkpoint to now
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut database, &config)
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
                 .await;
 
         assert!(
@@ -139,22 +136,14 @@ mod tests {
         Ok(())
     }
 
-    /// Test multiple sources processed in parallel.
-    ///
-    /// This test verifies:
-    /// - Multiple sources can be processed together
-    /// - Each source gets its own checkpoint
-    /// - Parallel processing works correctly
     #[tokio::test]
     async fn test_full_pipeline_multiple_sources() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_multi.rocksdb");
         let checkpoint_dir = temp_dir.path().join("checkpoints");
         std::fs::create_dir_all(&checkpoint_dir)?;
 
-        let mut database = init_datastore(&db_path)?;
+        let database = create_test_datastore().await;
 
-        // Speed up tests by disabling scraper delays
         unsafe {
             std::env::set_var("ARXIV_DELAY_MS", "0");
             std::env::set_var("DBLP_DELAY_MS", "0");
@@ -171,7 +160,7 @@ mod tests {
             ingestion: IngestionConfig {
                 chunk_size_days: 7,
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
-                weekly_days: 1, // Reduced to 1 to stay in 2026
+                weekly_days: 1, 
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
             },
             deduplication: DeduplicationConfig {
@@ -184,12 +173,10 @@ mod tests {
             polling_interval_ms: 100,
         };
 
-        // Run with multiple sources
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut database, &config)
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
                 .await;
 
-        // Verify checkpoints were created for both sources
         let arxiv_checkpoint = get_checkpoint("arxiv", &checkpoint_dir)?;
         let dblp_checkpoint = get_checkpoint("dblp", &checkpoint_dir)?;
 
@@ -204,21 +191,14 @@ mod tests {
         Ok(())
     }
 
-    /// Test checkpoint persistence and resumption.
-    ///
-    /// This test verifies:
-    /// - Checkpoints are saved after processing
-    /// - Subsequent runs resume from checkpoint
-    /// - No duplicate processing occurs
     #[tokio::test]
     async fn test_checkpoint_persistence_and_resumption() -> Result<(), Box<dyn std::error::Error>>
     {
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_checkpoint.rocksdb");
         let checkpoint_dir = temp_dir.path().join("checkpoints");
         std::fs::create_dir_all(&checkpoint_dir)?;
 
-        let mut database = init_datastore(&db_path)?;
+        let database = create_test_datastore().await;
 
         let sources = vec!["arxiv".to_string()];
 
@@ -244,7 +224,6 @@ mod tests {
             polling_interval_ms: 100,
         };
 
-        // First run - no checkpoint exists
         let checkpoint_before = get_checkpoint("arxiv", &checkpoint_dir)?;
         assert!(
             checkpoint_before.is_none(),
@@ -252,11 +231,10 @@ mod tests {
         );
 
         let result1 =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut database, &config)
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database.clone(), &config)
                 .await;
         assert!(result1.is_ok(), "First run failed: {:?}", result1.err());
 
-        // Verify checkpoint was created
         let checkpoint_after_first = get_checkpoint("arxiv", &checkpoint_dir)?;
         assert!(
             checkpoint_after_first.is_some(),
@@ -264,13 +242,11 @@ mod tests {
         );
         let first_checkpoint = checkpoint_after_first.unwrap();
 
-        // Second run - should resume from checkpoint
         let result2 =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut database, &config)
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
                 .await;
         assert!(result2.is_ok(), "Second run failed: {:?}", result2.err());
 
-        // Verify checkpoint was updated
         let checkpoint_after_second = get_checkpoint("arxiv", &checkpoint_dir)?;
         assert!(
             checkpoint_after_second.is_some(),
@@ -278,7 +254,6 @@ mod tests {
         );
         let second_checkpoint = checkpoint_after_second.unwrap();
 
-        // Second checkpoint should be later than first
         assert!(
             second_checkpoint >= first_checkpoint,
             "Checkpoint should advance"
@@ -287,24 +262,16 @@ mod tests {
         Ok(())
     }
 
-    /// Test chunking with small date ranges.
-    ///
-    /// This test verifies:
-    /// - Date ranges are properly chunked
-    /// - Small ranges work correctly
-    /// - Chunk boundaries are respected
     #[tokio::test]
     async fn test_chunking_small_range() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_chunking.rocksdb");
         let checkpoint_dir = temp_dir.path().join("checkpoints");
         std::fs::create_dir_all(&checkpoint_dir)?;
 
-        let mut database = init_datastore(&db_path)?;
+        let database = create_test_datastore().await;
 
         let sources = vec!["arxiv".to_string()];
 
-        // Set checkpoint to 3 days ago
         let start_checkpoint = Utc::now() - Duration::days(3);
         set_checkpoint("arxiv", start_checkpoint, &checkpoint_dir)?;
 
@@ -315,7 +282,7 @@ mod tests {
                 arxiv: Default::default(),
             },
             ingestion: IngestionConfig {
-                chunk_size_days: 1, // 1 day chunks, so 3 day range = 3 chunks
+                chunk_size_days: 1, 
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
@@ -330,9 +297,8 @@ mod tests {
             polling_interval_ms: 100,
         };
 
-        // Run weekly ingestion - should process 3 chunks
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut database, &config)
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
                 .await;
 
         assert!(
@@ -344,20 +310,13 @@ mod tests {
         Ok(())
     }
 
-    /// Test full mode starting from the beginning.
-    ///
-    /// This test verifies:
-    /// - Full mode ignores checkpoints for start date calculation
-    /// - Can process from very early dates
-    /// - Works with default configuration
     #[tokio::test]
     async fn test_full_mode_from_beginning() -> Result<(), Box<dyn std::error::Error>> {
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_full.rocksdb");
         let checkpoint_dir = temp_dir.path().join("checkpoints");
         std::fs::create_dir_all(&checkpoint_dir)?;
 
-        let mut database = init_datastore(&db_path)?;
+        let database = create_test_datastore().await;
 
         let sources = vec!["arxiv".to_string()];
 
@@ -368,7 +327,7 @@ mod tests {
                 arxiv: Default::default(),
             },
             ingestion: IngestionConfig {
-                chunk_size_days: 365, // Large chunks to keep test reasonable
+                chunk_size_days: 365, 
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
@@ -383,14 +342,11 @@ mod tests {
             polling_interval_ms: 100,
         };
 
-        // For this test, we'll use a checkpoint to limit the range
-        // but test that full mode still works
         let recent_checkpoint = Utc::now() - Duration::days(1);
         set_checkpoint("arxiv", recent_checkpoint, &checkpoint_dir)?;
 
-        // Run full ingestion - with checkpoint, should still process from checkpoint
         let result =
-            orchestrate_scraping_and_ingestion("full", sources.clone(), &mut database, &config)
+            orchestrate_scraping_and_ingestion("full", sources.clone(), database, &config)
                 .await;
 
         assert!(
@@ -402,49 +358,16 @@ mod tests {
         Ok(())
     }
 
-    /// Test error handling with invalid mode.
-    ///
-    /// This test verifies:
-    /// - Invalid modes are rejected
-    /// - Error messages are appropriate
     #[tokio::test]
     async fn test_invalid_mode_handling() -> Result<(), Box<dyn std::error::Error>> {
-        let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_invalid.rocksdb");
-        let checkpoint_dir = temp_dir.path().join("checkpoints");
-        std::fs::create_dir_all(&checkpoint_dir)?;
-
-        let mut database = init_datastore(&db_path)?;
-
+        let database = create_test_datastore().await;
         let sources = vec!["arxiv".to_string()];
+        let config = Config::default();
 
-        let config = Config {
-            scrapers: ScraperConfig {
-                enabled: sources.clone(),
-                dblp: Default::default(),
-                arxiv: Default::default(),
-            },
-            ingestion: IngestionConfig {
-                chunk_size_days: 1,
-                initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
-                weekly_days: 7,
-                checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
-            },
-            deduplication: DeduplicationConfig {
-                title_similarity_threshold: 0.9,
-                author_similarity_threshold: 0.5,
-                bloom_filter_size: 100,
-            },
-            edge_cache: Default::default(),
-            heartbeat_timeout_s: 60,
-            polling_interval_ms: 100,
-        };
-
-        // Run with invalid mode
         let result = orchestrate_scraping_and_ingestion(
             "invalid_mode",
             sources.clone(),
-            &mut database,
+            database,
             &config,
         )
         .await;
