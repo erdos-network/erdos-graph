@@ -6,8 +6,6 @@ use erdos_graph::db::client::init_datastore;
 use erdos_graph::logger::{self, AsyncLogger, init_logger};
 use erdos_graph::schedulers::{scrape_benchmark, scrape_full_refresh, scrape_weekly_update};
 use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Parser)]
 #[command(name = "erdos-graph")]
@@ -51,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize database
     let db_path = Path::new(&cli.db_path);
-    let datastore = Arc::new(Mutex::new(init_datastore(db_path)?));
+    let datastore = init_datastore(db_path)?;
 
     match cli.command {
         Commands::Daemon => {

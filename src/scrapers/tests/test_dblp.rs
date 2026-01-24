@@ -33,6 +33,7 @@ mod tests {
             page_size: 100,
             delay_ms: 0, // No delay for tests
             enable_cache: false,
+            cache_dir: ".dblp_cache".to_string(),
         };
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
@@ -274,6 +275,7 @@ mod tests {
             page_size: 100,
             delay_ms: 0,
             enable_cache: false,
+            cache_dir: ".dblp_cache".to_string(),
         };
 
         // Date setup
@@ -305,6 +307,7 @@ mod tests {
             page_size: 100,
             delay_ms: 0,
             enable_cache: false,
+            cache_dir: ".dblp_cache".to_string(),
         };
 
         // Historic year: 2020.
@@ -358,6 +361,7 @@ mod tests {
             page_size: 50,
             delay_ms: 10,
             enable_cache: true,
+            cache_dir: ".dblp_cache".to_string(),
         };
         let scraper = DblpScraper::with_config(config);
         assert!(
@@ -397,6 +401,7 @@ mod tests {
             page_size: 100,
             delay_ms: 0,
             enable_cache: false,
+            cache_dir: ".dblp_cache".to_string(),
         };
 
         let scraper = DblpScraper::with_config(config);
@@ -445,6 +450,7 @@ mod tests {
             page_size: 100,
             delay_ms: 0,
             enable_cache: false,
+            cache_dir: ".dblp_cache".to_string(),
         };
 
         let start = Utc.with_ymd_and_hms(2022, 1, 1, 0, 0, 0).unwrap();
@@ -589,6 +595,7 @@ mod tests {
             page_size: 100,
             delay_ms: 0,
             enable_cache: true,
+            cache_dir: ".dblp_cache".to_string(),
         };
 
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();

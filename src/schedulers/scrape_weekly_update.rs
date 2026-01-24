@@ -5,9 +5,8 @@
 
 use crate::config::Config;
 use crate::db::ingestion::orchestrate_scraping_and_ingestion;
-use indradb::{Database, Datastore};
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 /// Starts the weekly scraping scheduler.
@@ -17,31 +16,13 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 ///
 /// # Arguments
 /// * `config` - Configuration containing enabled sources and ingestion settings
-/// * `datastore` - Arc-wrapped Mutex of the IndraDB datastore
+/// * `datastore` - Arc-wrapped HelixGraphEngine
 ///
 /// # Returns
 /// `Ok(JobScheduler)` on success, which must be kept alive for the scheduler to run
-///
-/// # Example
-/// ```no_run
-/// # use erdos_graph::config::Config;
-/// # use erdos_graph::schedulers::scrape_weekly_update::start_weekly_scraper;
-/// # use indradb::Database;
-/// # use std::sync::Arc;
-/// # use tokio::sync::Mutex;
-/// #
-/// # async fn example<D: indradb::Datastore + Send + 'static>(
-/// #     config: Config,
-/// #     datastore: Arc<Mutex<Database<D>>>,
-/// # ) -> Result<(), Box<dyn std::error::Error>> {
-/// let scheduler = start_weekly_scraper(config, datastore).await?;
-/// scheduler.start().await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn start_weekly_scraper<D: Datastore + Send + 'static>(
+pub async fn start_weekly_scraper(
     config: Config,
-    datastore: Arc<Mutex<Database<D>>>,
+    datastore: Arc<HelixGraphEngine>,
 ) -> Result<JobScheduler, Box<dyn std::error::Error>> {
     let scheduler = JobScheduler::new().await?;
 
@@ -57,9 +38,7 @@ pub async fn start_weekly_scraper<D: Datastore + Send + 'static>(
         Box::pin(async move {
             println!("Starting weekly scrape for sources: {:?}", sources);
 
-            let mut db = datastore.lock().await;
-
-            match orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut *db, &config)
+            match orchestrate_scraping_and_ingestion("weekly", sources.clone(), datastore, &config)
                 .await
             {
                 Ok(_) => println!(

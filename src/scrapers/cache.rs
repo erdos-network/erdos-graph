@@ -2,18 +2,17 @@ use crate::config::{Config, EdgeCacheConfig};
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use bloomfilter::Bloom;
-use indradb::Json;
-use indradb::{
-    Database, Datastore, Identifier, QueryExt, QueryOutputValue, RangeVertexQuery,
-    SpecificVertexQuery,
-};
+use bumpalo::Bump;
+use helix_db::helix_engine::storage_core::HelixGraphStorage;
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
+use helix_db::protocol::value::Value;
+use helix_db::utils::items::Node;
 use lru::LruCache;
-use serde_json::json;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::time::Instant;
 use textdistance::{Algorithm, Cosine};
-use uuid::Uuid;
 
 /// Helper struct to manage deduplication caching.
 pub(crate) struct DeduplicationCache {
@@ -41,7 +40,7 @@ impl DeduplicationCache {
     pub(crate) fn add(
         &mut self,
         _year: u32,
-        _id: Uuid,
+        _id: String,
         title: String,
         authors: &[String],
         pub_id: String,
@@ -58,13 +57,13 @@ impl DeduplicationCache {
     pub(crate) fn check_exists_and_cache(
         &mut self,
         record: &PublicationRecord,
-        datastore: &Database<impl Datastore>,
+        engine: &Arc<HelixGraphEngine>,
         config: &Config,
     ) -> bool {
         let start = Instant::now();
         // Ensure cache is populated for this year
         if !self.loaded_years.contains(&record.year) {
-            self.populate_year(record.year, datastore);
+            self.populate_year(record.year, engine);
         }
 
         // Check exact ID match in memory first - FAST path
@@ -108,63 +107,72 @@ impl DeduplicationCache {
             }
         }
 
-        if let Ok(type_prop) = Identifier::new(crate::db::schema::PUBLICATION_TYPE)
-            && let Ok(year_prop) = Identifier::new("year")
-            && let Ok(title_prop) = Identifier::new("title")
-        {
-            let year_val = Json::new(json!(record.year.to_string()));
-            let q = RangeVertexQuery::new()
-                .t(type_prop)
-                .with_property_equal_to(year_prop, year_val);
+        // Deep check against DB using 'year' index
+        let txn = match engine.storage.graph_env.read_txn() {
+            Ok(t) => t,
+            Err(e) => {
+                logger::error(&format!("Failed to start read txn: {}", e));
+                return false;
+            }
+        };
 
-            if let Ok(q) = q
-                && let Ok(q_props) = q.properties()
-                && let Ok(results) = datastore.get(q_props)
-                && let Some(QueryOutputValue::VertexProperties(vps)) = results.first()
+        let arena = Bump::new();
+
+        if let Some((year_index_db, _)) = engine.storage.secondary_indices.get("year") {
+            let year_str = record.year.to_string();
+            if let Ok(key_bytes) = bincode::serialize(&Value::String(year_str))
+                && let Ok(iter) = year_index_db.prefix_iter(&txn, &key_bytes)
             {
                 let cosine = Cosine::default();
                 let record_title_lower = record.title.to_lowercase();
 
-                for vp in vps {
-                    if let Some(val) = vp.props.iter().find(|p| p.name == title_prop)
-                        && let Some(title) = val.value.as_str()
+                for (_, node_id) in iter.flatten() {
+                    if let Ok(Some(node_bytes)) = engine.storage.nodes_db.get(&txn, &node_id)
+                        && let Ok(node) = Node::from_bincode_bytes(node_id, node_bytes, &arena)
                     {
-                        // If normalized titles are identical, skip cosine
-                        if record_title_norm == normalize_title(title) {
-                            if check_authors_similarity(
-                                &vp.vertex.id,
-                                &record.authors,
-                                datastore,
-                                config.deduplication.author_similarity_threshold,
-                            ) {
-                                logger::debug(&format!(
-                                    "Cache hit (exact title) for '{}' - took {}ms",
-                                    record.title,
-                                    start.elapsed().as_millis()
-                                ));
-                                return true;
-                            }
+                        if node.label != crate::db::schema::PUBLICATION_TYPE {
                             continue;
                         }
 
-                        let db_title_lower = title.to_lowercase();
-                        let similarity =
-                            cosine.for_str(&record_title_lower, &db_title_lower).nval();
+                        if let Some(Value::String(title)) = node.get_property("title") {
+                            if record_title_norm == normalize_title(title) {
+                                if check_authors_similarity(
+                                    &node.id,
+                                    &record.authors,
+                                    engine,
+                                    &txn,
+                                    config.deduplication.author_similarity_threshold,
+                                ) {
+                                    logger::debug(&format!(
+                                        "Cache hit (exact title) for '{}' - took {}ms",
+                                        record.title,
+                                        start.elapsed().as_millis()
+                                    ));
+                                    return true;
+                                }
+                                continue;
+                            }
 
-                        if similarity >= config.deduplication.title_similarity_threshold
-                            && check_authors_similarity(
-                                &vp.vertex.id,
-                                &record.authors,
-                                datastore,
-                                config.deduplication.author_similarity_threshold,
-                            )
-                        {
-                            logger::debug(&format!(
-                                "Cache hit (similarity) for '{}' - took {}ms",
-                                record.title,
-                                find_elapsed_millis(start)
-                            ));
-                            return true;
+                            let db_title_lower = title.to_lowercase();
+                            let similarity =
+                                cosine.for_str(&record_title_lower, &db_title_lower).nval();
+
+                            if similarity >= config.deduplication.title_similarity_threshold
+                                && check_authors_similarity(
+                                    &node.id,
+                                    &record.authors,
+                                    engine,
+                                    &txn,
+                                    config.deduplication.author_similarity_threshold,
+                                )
+                            {
+                                logger::debug(&format!(
+                                    "Cache hit (similarity) for '{}' - took {}ms",
+                                    record.title,
+                                    find_elapsed_millis(start)
+                                ));
+                                return true;
+                            }
                         }
                     }
                 }
@@ -179,84 +187,94 @@ impl DeduplicationCache {
         false
     }
 
-    fn populate_year(&mut self, year: u32, datastore: &Database<impl Datastore>) {
+    fn populate_year(&mut self, year: u32, engine: &Arc<HelixGraphEngine>) {
         let start = Instant::now();
-        // Fetch all papers for the year
-        if let Ok(type_prop) = Identifier::new(crate::db::schema::PUBLICATION_TYPE)
-            && let Ok(year_prop) = Identifier::new("year")
-            && let Ok(title_prop) = Identifier::new("title")
-            && let Ok(id_prop) = Identifier::new("publication_id")
-        {
-            let year_val = Json::new(json!(year.to_string()));
+        let txn = match engine.storage.graph_env.read_txn() {
+            Ok(t) => t,
+            Err(e) => {
+                logger::error(&format!("Failed to start read txn for populate: {}", e));
+                return;
+            }
+        };
 
-            // We need vertex ID, title, and publiction ID
-            let q = RangeVertexQuery::new()
-                .t(type_prop)
-                .with_property_equal_to(year_prop, year_val);
+        let mut count = 0;
+        let arena = Bump::new();
 
-            if let Ok(q) = q
-                && let Ok(q_props) = q.properties()
-                && let Ok(results) = datastore.get(q_props)
-                && let Some(QueryOutputValue::VertexProperties(vps)) = results.first()
+        if let Some((year_index_db, _)) = engine.storage.secondary_indices.get("year") {
+            let year_str = year.to_string();
+            if let Ok(key_bytes) = bincode::serialize(&Value::String(year_str))
+                && let Ok(iter) = year_index_db.prefix_iter(&txn, &key_bytes)
             {
-                let mut count = 0;
-                let mut pub_ids = Vec::with_capacity(vps.len());
-
-                for vp in vps {
-                    let mut title_opt = None;
-                    let mut id_opt = None;
-
-                    for p in &vp.props {
-                        if p.name == title_prop {
-                            title_opt = p.value.as_str();
-                        } else if p.name == id_prop {
-                            id_opt = p.value.as_str();
+                for (_, node_id) in iter.flatten() {
+                    if let Ok(Some(node_bytes)) = engine.storage.nodes_db.get(&txn, &node_id)
+                        && let Ok(node) = Node::from_bincode_bytes(node_id, node_bytes, &arena)
+                    {
+                        if node.label != crate::db::schema::PUBLICATION_TYPE {
+                            continue;
                         }
-                    }
 
-                    if let Some(title) = title_opt {
-                        let norm = normalize_title(title);
-                        self.title_filter.set(&norm);
-                        pub_ids.push(vp.vertex.id);
-                        count += 1;
-                    }
+                        let mut title_opt = None;
+                        let mut id_opt = None;
 
-                    if let Some(pid) = id_opt {
-                        self.published_ids.insert(pid.to_string());
-                    }
-                }
+                        if let Some(Value::String(t)) = node.get_property("title") {
+                            title_opt = Some(t);
+                        }
+                        if let Some(Value::String(pid)) = node.get_property("publication_id") {
+                            id_opt = Some(pid);
+                        }
 
-                // Batch fetch authors
-                if !pub_ids.is_empty() {
-                    for chunk in pub_ids.chunks(1000) {
-                        let q = SpecificVertexQuery::new(chunk.to_vec());
-                        if let Ok(q_in) = q.inbound()
-                            && let Ok(q_out) = q_in.outbound()
-                            && let Ok(q_props) = q_out.properties()
-                            && let Ok(results) = datastore.get(q_props)
-                            && let Some(QueryOutputValue::VertexProperties(author_vps)) =
-                                results.first()
-                            && let Ok(name_prop) = Identifier::new("name")
-                        {
-                            for avp in author_vps {
-                                if let Some(val) = avp.props.iter().find(|p| p.name == name_prop)
-                                    && let Some(name) = val.value.as_str()
-                                {
-                                    self.author_filter.set(&normalize_title(name));
+                        if let Some(title) = title_opt {
+                            let norm = normalize_title(title);
+                            self.title_filter.set(&norm);
+                            count += 1;
+                        }
+                        if let Some(pid) = id_opt {
+                            self.published_ids.insert(pid.to_string());
+                        }
+
+                        let label_hash = helix_db::utils::label_hash::hash_label(
+                            crate::db::schema::AUTHORED_TYPE,
+                            None,
+                        );
+                        let in_key = HelixGraphStorage::in_edge_key(&node.id, &label_hash);
+
+                        if let Ok(iter) = engine.storage.in_edges_db.prefix_iter(&txn, &in_key) {
+                            for (key, val_bytes) in iter.flatten() {
+                                // Check if the key still matches our prefix
+                                if !key.starts_with(&in_key) {
+                                    break;
+                                }
+                                if val_bytes.len() >= 32 {
+                                    let mut author_id_bytes = [0u8; 16];
+                                    author_id_bytes.copy_from_slice(&val_bytes[16..32]);
+                                    let author_id = u128::from_be_bytes(author_id_bytes);
+
+                                    if let Ok(Some(author_bytes)) =
+                                        engine.storage.nodes_db.get(&txn, &author_id)
+                                        && let Ok(author_node) = Node::from_bincode_bytes(
+                                            author_id,
+                                            author_bytes,
+                                            &arena,
+                                        )
+                                        && let Some(Value::String(name)) =
+                                            author_node.get_property("name")
+                                    {
+                                        self.author_filter.set(&normalize_title(name));
+                                    }
                                 }
                             }
                         }
                     }
                 }
-
-                logger::info(&format!(
-                    "Populated filters for year {}: {} records in {}ms",
-                    year,
-                    count,
-                    start.elapsed().as_millis()
-                ));
             }
         }
+
+        logger::info(&format!(
+            "Populated filters for year {}: {} records in {}ms",
+            year,
+            count,
+            start.elapsed().as_millis()
+        ));
         self.loaded_years.insert(year);
     }
 }
@@ -299,64 +317,73 @@ fn find_elapsed_millis(start: Instant) -> u128 {
 
 /// Helper to check author similarity
 fn check_authors_similarity(
-    pub_vertex_id: &Uuid,
+    pub_node_id: &u128,
     authors: &[String],
-    datastore: &Database<impl Datastore>,
+    engine: &Arc<HelixGraphEngine>,
+    txn: &heed3::RoTxn,
     threshold: f64,
 ) -> bool {
-    // Fetch authors linked to the publication vertex
-    let q = SpecificVertexQuery::single(*pub_vertex_id);
-    if let Ok(q_in) = q.inbound()
-        && let Ok(q_out) = q_in.outbound()
-        && let Ok(q_props) = q_out.properties()
-        && let Ok(results) = datastore.get(q_props)
-        && let Some(QueryOutputValue::VertexProperties(vps)) = results.first()
-        && let Ok(name_prop) = Identifier::new("name")
-    {
-        let db_authors: Vec<String> = vps
-            .iter()
-            .filter_map(|vp| {
-                vp.props
-                    .iter()
-                    .find(|p| p.name == name_prop)
-                    .and_then(|val| val.value.as_str().map(|s| s.to_string()))
-            })
-            .collect();
+    let arena = Bump::new();
+    let label_hash =
+        helix_db::utils::label_hash::hash_label(crate::db::schema::AUTHORED_TYPE, None);
+    let in_key = HelixGraphStorage::in_edge_key(pub_node_id, &label_hash);
 
-        if db_authors.is_empty() {
-            return false;
-        }
+    let mut db_authors = Vec::new();
 
-        let cosine = Cosine::default();
-        let mut match_count = 0;
+    if let Ok(iter) = engine.storage.in_edges_db.prefix_iter(txn, &in_key) {
+        for (key, val_bytes) in iter.flatten() {
+            // Check if the key still matches our prefix
+            if !key.starts_with(&in_key) {
+                break;
+            }
+            if val_bytes.len() >= 32 {
+                let mut author_id_bytes = [0u8; 16];
+                author_id_bytes.copy_from_slice(&val_bytes[16..32]);
+                let author_id = u128::from_be_bytes(author_id_bytes);
 
-        for author in authors {
-            let author_norm = normalize_author(author);
-            for db_author in &db_authors {
-                let db_author_norm = normalize_author(db_author);
-                if cosine.for_str(&author_norm, &db_author_norm).nval() >= threshold {
-                    match_count += 1;
-                    break;
+                if let Ok(Some(author_bytes)) = engine.storage.nodes_db.get(txn, &author_id)
+                    && let Ok(author_node) =
+                        Node::from_bincode_bytes(author_id, author_bytes, &arena)
+                    && let Some(Value::String(name)) = author_node.get_property("name")
+                {
+                    db_authors.push(name.to_string());
                 }
             }
         }
-
-        // If at least 50% of authors match, consider it the same publication
-        return (match_count as f64 / authors.len() as f64) >= 0.5;
     }
-    false
+
+    if db_authors.is_empty() {
+        return false;
+    }
+
+    let cosine = Cosine::default();
+    let mut match_count = 0;
+
+    for author in authors {
+        let author_norm = normalize_author(author);
+        for db_author in &db_authors {
+            let db_author_norm = normalize_author(db_author);
+            if cosine.for_str(&author_norm, &db_author_norm).nval() >= threshold {
+                match_count += 1;
+                break;
+            }
+        }
+    }
+
+    // If at least 50% of authors match, consider it the same publication
+    (match_count as f64 / authors.len() as f64) >= 0.5
 }
 
 /// Three-tier edge cache system
 pub(crate) struct EdgeCacheSystem {
     /// Tier 1 hot cache
-    pub(crate) hot_cache: LruCache<(Uuid, Uuid), u64>,
+    pub(crate) hot_cache: LruCache<(u128, u128), u64>,
 
     /// Tier 2 warm cache
-    pub(crate) warm_cache: LruCache<(Uuid, Uuid), u64>,
+    pub(crate) warm_cache: LruCache<(u128, u128), u64>,
 
     /// Tier 3 cold bloom filter
-    pub(crate) cold_bloom: Bloom<(Uuid, Uuid)>,
+    pub(crate) cold_bloom: Bloom<(u128, u128)>,
 
     pub edges_loaded: bool,
 }
@@ -372,7 +399,7 @@ impl EdgeCacheSystem {
     }
 
     /// Get weight from cache with promotion
-    pub fn get(&mut self, key: (Uuid, Uuid)) -> Option<u64> {
+    pub fn get(&mut self, key: (u128, u128)) -> Option<u64> {
         // Check hot cache
         if let Some(&weight) = self.hot_cache.get(&key) {
             return Some(weight);
@@ -389,7 +416,7 @@ impl EdgeCacheSystem {
     }
 
     /// Insert into cache with eviction handling
-    pub fn put(&mut self, key: (Uuid, Uuid), weight: u64) {
+    pub fn put(&mut self, key: (u128, u128), weight: u64) {
         // Evict from hot to warm if full
         if self.hot_cache.len() == self.hot_cache.cap().get()
             && !self.hot_cache.contains(&key)
@@ -406,7 +433,7 @@ impl EdgeCacheSystem {
     }
 
     /// Check bloom existence
-    pub fn exists(&self, key: (Uuid, Uuid)) -> bool {
+    pub fn exists(&self, key: (u128, u128)) -> bool {
         self.cold_bloom.check(&key)
     }
 }

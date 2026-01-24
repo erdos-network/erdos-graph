@@ -6,12 +6,9 @@
 use crate::config::Config;
 use crate::db::ingestion::orchestrate_scraping_and_ingestion;
 use crate::logger;
-use indradb::{Database, Datastore};
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
-
-use tempfile::TempDir;
 
 /// Runs a benchmark scrape for a specified duration (in weeks).
 ///
@@ -23,14 +20,14 @@ use tempfile::TempDir;
 /// # Arguments
 /// * `num_weeks` - Number of weeks to scrape back
 /// * `config` - Base application configuration
-/// * `datastore` - Arc-wrapped Mutex of the IndraDB datastore
+/// * `datastore` - Arc-wrapped HelixGraphEngine
 ///
 /// # Returns
 /// `Ok(Duration)` containing the elapsed time, or an error if execution fails
-pub async fn run_benchmark<D: Datastore + Send + 'static>(
+pub async fn run_benchmark(
     num_weeks: u64,
     mut config: Config,
-    datastore: Arc<Mutex<Database<D>>>,
+    datastore: Arc<HelixGraphEngine>,
 ) -> Result<std::time::Duration, Box<dyn std::error::Error>> {
     let sources = config.scrapers.enabled.clone();
     logger::info(&format!(
@@ -38,22 +35,35 @@ pub async fn run_benchmark<D: Datastore + Send + 'static>(
         num_weeks, sources
     ));
 
-    // Create temporary directory for checkpoints to isolate benchmark
-    // This ensures we scrape the full requested duration regardless of existing checkpoints
-    let temp_checkpoint_dir = TempDir::new()?;
-    config.ingestion.checkpoint_dir =
-        Some(temp_checkpoint_dir.path().to_string_lossy().to_string());
+    // Use subdirectories of configured paths for benchmark artifacts to ensure isolation and respect gitignore
+    let base_checkpoint_dir = config
+        .ingestion
+        .checkpoint_dir
+        .as_deref()
+        .unwrap_or("checkpoints");
+    let benchmark_checkpoint_dir = std::path::Path::new(base_checkpoint_dir).join("benchmark");
+
+    let base_cache_dir = &config.scrapers.dblp.cache_dir;
+    let benchmark_cache_dir = std::path::Path::new(base_cache_dir).join("benchmark");
+
+    // Clean up existing benchmark directories to ensure a fresh run
+    if benchmark_checkpoint_dir.exists() {
+        std::fs::remove_dir_all(&benchmark_checkpoint_dir)?;
+    }
+    // We also clean the cache to benchmark the full scraping process including network requests
+    if benchmark_cache_dir.exists() {
+        std::fs::remove_dir_all(&benchmark_cache_dir)?;
+    }
+
+    config.ingestion.checkpoint_dir = Some(benchmark_checkpoint_dir.to_string_lossy().to_string());
+    config.scrapers.dblp.cache_dir = benchmark_cache_dir.to_string_lossy().to_string();
 
     // Override weekly_days in config for the benchmark
     config.ingestion.weekly_days = num_weeks * 7;
 
-    // Acquire lock to ensure exclusive access
-    // This acts as the queue: if another job is running, we wait here.
-    let mut db = datastore.lock().await;
-
     let start_time = Instant::now();
 
-    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut *db, &config).await {
+    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), datastore, &config).await {
         Ok(_) => {
             let duration = start_time.elapsed();
             logger::info(&format!(

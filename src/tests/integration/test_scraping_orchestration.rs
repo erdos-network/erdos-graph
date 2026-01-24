@@ -1,7 +1,8 @@
 use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
 use crate::scrapers::scraping_orchestrator::run_scrape;
 use chrono::{Duration, Utc};
-use indradb::RocksdbDatastore;
+use helix_db::helix_engine::traversal_core::{HelixGraphEngine, HelixGraphEngineOpts};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 #[cfg(test)]
@@ -9,13 +10,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[allow(clippy::field_reassign_with_default)]
     async fn test_scraping_flow_arxiv() -> Result<(), Box<dyn std::error::Error>> {
         // Create temporary directory for the database
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_arxiv.rocksdb");
+        let db_path = temp_dir.path().join("test_db_arxiv.helix");
+        std::fs::create_dir_all(&db_path)?;
 
-        // Initialize RocksDB datastore
-        let mut database = RocksdbDatastore::new_db(db_path)?;
+        // Initialize Helix datastore
+        let mut opts = HelixGraphEngineOpts::default();
+        opts.path = db_path.to_string_lossy().to_string();
+        let engine = Arc::new(HelixGraphEngine::new(opts)?);
 
         // Define short time range to keep the test fast
         let end_date = Utc::now();
@@ -46,7 +51,7 @@ mod tests {
             polling_interval_ms: 100,
         };
 
-        let result = run_scrape(start_date, end_date, sources, &mut database, &config).await;
+        let result = run_scrape(start_date, end_date, sources, engine, &config).await;
 
         assert!(result.is_ok(), "Scraping failed: {:?}", result.err());
 
@@ -54,11 +59,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::field_reassign_with_default)]
     async fn test_scraping_flow_dblp() -> Result<(), Box<dyn std::error::Error>> {
         // Create a temporary database
         let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("test_db_dblp.rocksdb");
-        let mut database = RocksdbDatastore::new_db(db_path)?;
+        let db_path = temp_dir.path().join("test_db_dblp.helix");
+        std::fs::create_dir_all(&db_path)?;
+
+        let mut opts = HelixGraphEngineOpts::default();
+        opts.path = db_path.to_string_lossy().to_string();
+        let engine = Arc::new(HelixGraphEngine::new(opts)?);
 
         // Config setup
         let config = Config {
@@ -88,7 +98,7 @@ mod tests {
         let start_date = end_date - Duration::days(1);
         let sources = vec!["dblp".to_string()];
 
-        let result = run_scrape(start_date, end_date, sources, &mut database, &config).await;
+        let result = run_scrape(start_date, end_date, sources, engine, &config).await;
 
         assert!(result.is_ok(), "DBLP scraping failed: {:?}", result.err());
 

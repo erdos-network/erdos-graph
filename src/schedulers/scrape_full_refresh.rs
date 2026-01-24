@@ -5,9 +5,8 @@
 
 use crate::config::Config;
 use crate::db::ingestion::orchestrate_scraping_and_ingestion;
-use indradb::{Database, Datastore};
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// Runs a full refresh scrape for the specified sources.
 ///
@@ -17,21 +16,18 @@ use tokio::sync::Mutex;
 /// # Arguments
 /// * `sources` - List of sources to scrape (e.g., "arxiv", "dblp")
 /// * `config` - Application configuration
-/// * `datastore` - Arc-wrapped Mutex of the IndraDB datastore
+/// * `datastore` - Arc-wrapped HelixGraphEngine
 ///
 /// # Returns
 /// `Ok(())` on success, or an error if scraping fails
-pub async fn run_full_refresh<D: Datastore + Send + 'static>(
+pub async fn run_full_refresh(
     sources: Vec<String>,
     config: Config,
-    datastore: Arc<Mutex<Database<D>>>,
+    datastore: Arc<HelixGraphEngine>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting full refresh scrape for sources: {:?}", sources);
 
-    // Acquire lock to ensure no other jobs are running
-    let mut db = datastore.lock().await;
-
-    match orchestrate_scraping_and_ingestion("initial", sources.clone(), &mut *db, &config).await {
+    match orchestrate_scraping_and_ingestion("initial", sources.clone(), datastore, &config).await {
         Ok(_) => {
             println!(
                 "Full refresh scrape completed successfully for sources: {:?}",

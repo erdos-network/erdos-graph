@@ -14,12 +14,35 @@ pub struct Config {
     pub polling_interval_ms: u64,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            scrapers: ScraperConfig::default(),
+            ingestion: IngestionConfig::default(),
+            deduplication: DeduplicationConfig::default(),
+            edge_cache: EdgeCacheConfig::default(),
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct DeduplicationConfig {
     pub title_similarity_threshold: f64,
     pub author_similarity_threshold: f64,
     #[serde(default = "default_bloom_filter_size")]
     pub bloom_filter_size: usize,
+}
+
+impl Default for DeduplicationConfig {
+    fn default() -> Self {
+        Self {
+            title_similarity_threshold: 0.9,
+            author_similarity_threshold: 0.5,
+            bloom_filter_size: default_bloom_filter_size(),
+        }
+    }
 }
 
 fn default_bloom_filter_size() -> usize {
@@ -68,8 +91,20 @@ pub struct IngestionConfig {
     pub checkpoint_dir: Option<String>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+impl Default for IngestionConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size_days: 1,
+            initial_start_date: "1932-01-01T00:00:00Z".to_string(),
+            weekly_days: 7,
+            checkpoint_dir: None,
+        }
+    }
+}
+
+#[derive(Deserialize, Clone, Debug, Default)]
 pub struct ScraperConfig {
+    #[serde(default)]
     pub enabled: Vec<String>,
     #[serde(default)]
     pub dblp: DblpSourceConfig,
@@ -87,6 +122,8 @@ pub struct DblpSourceConfig {
     pub delay_ms: u64,
     #[serde(default = "default_dblp_enable_cache")]
     pub enable_cache: bool,
+    #[serde(default = "default_dblp_cache_dir")]
+    pub cache_dir: String,
 }
 
 impl Default for DblpSourceConfig {
@@ -96,6 +133,7 @@ impl Default for DblpSourceConfig {
             page_size: default_dblp_page_size(),
             delay_ms: default_dblp_delay_ms(),
             enable_cache: default_dblp_enable_cache(),
+            cache_dir: default_dblp_cache_dir(),
         }
     }
 }
@@ -111,6 +149,9 @@ fn default_dblp_delay_ms() -> u64 {
 }
 fn default_dblp_enable_cache() -> bool {
     true
+}
+fn default_dblp_cache_dir() -> String {
+    ".dblp_cache".to_string()
 }
 
 #[derive(Deserialize, Clone, Debug)]

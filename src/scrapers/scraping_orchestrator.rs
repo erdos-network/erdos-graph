@@ -5,7 +5,8 @@ use crate::scrapers::ingestion_utils::{IngestionContext, ingest_batch};
 use crate::scrapers::{ArxivScraper, DblpScraper, Scraper, ZbmathScraper};
 use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
 use chrono::{DateTime, Utc};
-use indradb::{Database, Datastore};
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
+use std::sync::Arc;
 use std::time::Duration as StdDuration; // Added for timeout logic
 use std::time::Instant;
 
@@ -20,7 +21,7 @@ use std::time::Instant;
 /// * `start_date` - Start date for scraping
 /// * `end_date` - End date for scraping
 /// * `sources` - List of sources to scrape ("arxiv", "dblp", or "zbmath")
-/// * `datastore` - Mutable reference to the IndraDB datastore
+/// * `datastore` - Arc-wrapped HelixGraphEngine
 /// * `config` - Reference to the application configuration
 ///
 /// # Returns
@@ -35,7 +36,7 @@ pub async fn run_scrape(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
     sources: Vec<String>,
-    datastore: &mut Database<impl Datastore>,
+    datastore: Arc<HelixGraphEngine>,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Define queue
@@ -88,10 +89,10 @@ pub async fn run_scrape(
     let mut context = IngestionContext::new(config);
 
     // Preload authors and edges to speed up ingestion
-    if let Err(e) = context.preload_authors(datastore) {
+    if let Err(e) = context.preload_authors(&datastore) {
         logger::error(&format!("Failed to preload authors: {}", e));
     }
-    if let Err(e) = context.preload_edge_bloom(datastore) {
+    if let Err(e) = context.preload_edge_bloom(&datastore) {
         logger::error(&format!("Failed to preload edge bloom filter: {}", e));
     }
 
@@ -120,8 +121,13 @@ pub async fn run_scrape(
 
         if should_flush {
             let batch_len = batch.len();
-            if let Err(e) =
-                ingest_batch(std::mem::take(&mut batch), datastore, config, &mut context).await
+            if let Err(e) = ingest_batch(
+                std::mem::take(&mut batch),
+                datastore.clone(),
+                config,
+                &mut context,
+            )
+            .await
             {
                 logger::error(&format!("Failed to ingest batch: {}", e));
             }

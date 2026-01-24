@@ -1,7 +1,9 @@
 //! Graph database schema definition.
 //!
 //! This module defines the vertex types, edge types, and property schemas
-//! used in the Erdős Graph database.
+//! used in the Erdős Graph database. It also provides the internal
+//! data structures (`GraphVertex`, `GraphEdge`) used to decouple the
+//! application logic from the underlying database driver.
 //!
 //! # Graph Structure
 //! - **Person vertices**: Represent authors with name, Erdős number, and aliases
@@ -9,7 +11,10 @@
 //! - **AUTHORED edges**: Connect Person vertices to their publications
 //! - **COAUTHORED_WITH edges**: Connect co-authors with weights representing collaboration count
 
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Vertex type identifier for Person nodes
 pub const PERSON_TYPE: &str = "Person";
@@ -22,6 +27,62 @@ pub const AUTHORED_TYPE: &str = "AUTHORED";
 
 /// Edge type for co-authorship relationships (Person -> Person)
 pub const COAUTHORED_WITH_TYPE: &str = "COAUTHORED_WITH";
+
+/// Represents a generic Vertex in the graph, independent of the underlying DB.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphVertex {
+    pub id: Uuid,
+    pub t: String,
+    pub props: HashMap<String, Value>,
+}
+
+impl GraphVertex {
+    pub fn new(t: &str) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            t: t.to_string(),
+            props: HashMap::new(),
+        }
+    }
+
+    pub fn with_id(id: Uuid, t: &str) -> Self {
+        Self {
+            id,
+            t: t.to_string(),
+            props: HashMap::new(),
+        }
+    }
+
+    pub fn property<V: Into<Value>>(mut self, key: &str, value: V) -> Self {
+        self.props.insert(key.to_string(), value.into());
+        self
+    }
+}
+
+/// Represents a generic Edge in the graph, independent of the underlying DB.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphEdge {
+    pub source_id: Uuid,
+    pub target_id: Uuid,
+    pub t: String,
+    pub props: HashMap<String, Value>,
+}
+
+impl GraphEdge {
+    pub fn new(source_id: Uuid, target_id: Uuid, t: &str) -> Self {
+        Self {
+            source_id,
+            target_id,
+            t: t.to_string(),
+            props: HashMap::new(),
+        }
+    }
+
+    pub fn property<V: Into<Value>>(mut self, key: &str, value: V) -> Self {
+        self.props.insert(key.to_string(), value.into());
+        self
+    }
+}
 
 /// Returns the property schema for Person vertices.
 ///

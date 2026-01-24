@@ -289,13 +289,15 @@ pub async fn scrape_range_with_config(
             logger::debug(&format!("Fetching DBLP URL: {}", url));
 
             // Use cached fetch if available
-            let body_text = match fetch_url_cached(&client, &url, config.enable_cache).await {
-                Ok(text) => text,
-                Err(e) => {
-                    logger::error(&format!("Failed to fetch URL {}: {}", url, e));
-                    break;
-                }
-            };
+            let body_text =
+                match fetch_url_cached(&client, &url, config.enable_cache, &config.cache_dir).await
+                {
+                    Ok(text) => text,
+                    Err(e) => {
+                        logger::error(&format!("Failed to fetch URL {}: {}", url, e));
+                        break;
+                    }
+                };
 
             // DBLP sometimes returns malformed JSON or unexpected structures?
             // Parsing
@@ -351,6 +353,7 @@ async fn fetch_url_cached(
     client: &Client,
     url: &str,
     enable_cache: bool,
+    cache_dir_str: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     if !enable_cache {
         let resp = client.get(url).send().await?;
@@ -360,7 +363,7 @@ async fn fetch_url_cached(
         return Ok(resp.text().await?);
     }
 
-    let cache_dir = Path::new(".dblp_cache");
+    let cache_dir = Path::new(cache_dir_str);
     if !cache_dir.exists() {
         fs::create_dir_all(cache_dir)?;
     }
