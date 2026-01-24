@@ -121,8 +121,13 @@ pub async fn run_scrape(
 
         if should_flush {
             let batch_len = batch.len();
-            if let Err(e) =
-                ingest_batch(std::mem::take(&mut batch), datastore.clone(), config, &mut context).await
+            if let Err(e) = ingest_batch(
+                std::mem::take(&mut batch),
+                datastore.clone(),
+                config,
+                &mut context,
+            )
+            .await
             {
                 logger::error(&format!("Failed to ingest batch: {}", e));
             }

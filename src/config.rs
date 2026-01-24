@@ -131,6 +131,8 @@ pub struct DblpSourceConfig {
     pub delay_ms: u64,
     #[serde(default = "default_dblp_enable_cache")]
     pub enable_cache: bool,
+    #[serde(default = "default_dblp_cache_dir")]
+    pub cache_dir: String,
 }
 
 impl Default for DblpSourceConfig {
@@ -140,6 +142,7 @@ impl Default for DblpSourceConfig {
             page_size: default_dblp_page_size(),
             delay_ms: default_dblp_delay_ms(),
             enable_cache: default_dblp_enable_cache(),
+            cache_dir: default_dblp_cache_dir(),
         }
     }
 }
@@ -155,6 +158,9 @@ fn default_dblp_delay_ms() -> u64 {
 }
 fn default_dblp_enable_cache() -> bool {
     true
+}
+fn default_dblp_cache_dir() -> String {
+    ".dblp_cache".to_string()
 }
 
 #[derive(Deserialize, Clone, Debug)]

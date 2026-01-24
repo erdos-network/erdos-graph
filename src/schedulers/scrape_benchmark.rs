@@ -10,8 +10,6 @@ use helix_db::helix_engine::traversal_core::HelixGraphEngine;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tempfile::TempDir;
-
 /// Runs a benchmark scrape for a specified duration (in weeks).
 ///
 /// This job modifies the configuration to scrape back `num_weeks` and times the execution.
@@ -37,11 +35,28 @@ pub async fn run_benchmark(
         num_weeks, sources
     ));
 
-    // Create temporary directory for checkpoints to isolate benchmark
-    // This ensures we scrape the full requested duration regardless of existing checkpoints
-    let temp_checkpoint_dir = TempDir::new()?;
-    config.ingestion.checkpoint_dir =
-        Some(temp_checkpoint_dir.path().to_string_lossy().to_string());
+    // Use subdirectories of configured paths for benchmark artifacts to ensure isolation and respect gitignore
+    let base_checkpoint_dir = config
+        .ingestion
+        .checkpoint_dir
+        .as_deref()
+        .unwrap_or("checkpoints");
+    let benchmark_checkpoint_dir = std::path::Path::new(base_checkpoint_dir).join("benchmark");
+
+    let base_cache_dir = &config.scrapers.dblp.cache_dir;
+    let benchmark_cache_dir = std::path::Path::new(base_cache_dir).join("benchmark");
+
+    // Clean up existing benchmark directories to ensure a fresh run
+    if benchmark_checkpoint_dir.exists() {
+        std::fs::remove_dir_all(&benchmark_checkpoint_dir)?;
+    }
+    // We also clean the cache to benchmark the full scraping process including network requests
+    if benchmark_cache_dir.exists() {
+        std::fs::remove_dir_all(&benchmark_cache_dir)?;
+    }
+
+    config.ingestion.checkpoint_dir = Some(benchmark_checkpoint_dir.to_string_lossy().to_string());
+    config.scrapers.dblp.cache_dir = benchmark_cache_dir.to_string_lossy().to_string();
 
     // Override weekly_days in config for the benchmark
     config.ingestion.weekly_days = num_weeks * 7;

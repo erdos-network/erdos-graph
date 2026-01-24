@@ -4,13 +4,12 @@ mod tests {
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::cache::{DeduplicationCache, EdgeCacheSystem};
     use crate::scrapers::ingestion_utils::{
-        IngestionContext, add_publication, create_authored_edge,
-        create_coauthor_edge, flush_buffer, get_or_create_author_vertex, ingest_batch,
-        publication_exists,
+        IngestionContext, add_publication, create_authored_edge, create_coauthor_edge,
+        flush_buffer, get_or_create_author_vertex, ingest_batch, publication_exists,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
-    use helix_db::helix_engine::traversal_core::{HelixGraphEngine, HelixGraphEngineOpts};
     use helix_db::helix_engine::storage_core::HelixGraphStorage;
+    use helix_db::helix_engine::traversal_core::{HelixGraphEngine, HelixGraphEngineOpts};
     use helix_db::protocol::value::Value as HelixValue;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -23,7 +22,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test_db.helix");
         std::fs::create_dir_all(&db_path).unwrap();
-        
+
         let mut opts = HelixGraphEngineOpts::default();
         opts.path = db_path.to_string_lossy().to_string();
         // Configure indices
@@ -33,8 +32,9 @@ mod tests {
             helix_db::helix_engine::types::SecondaryIndex::Index("publication_id".to_string()),
             helix_db::helix_engine::types::SecondaryIndex::Index("name".to_string()),
         ];
-        
-        let mut graph_config = helix_db::helix_engine::traversal_core::config::GraphConfig::default();
+
+        let mut graph_config =
+            helix_db::helix_engine::traversal_core::config::GraphConfig::default();
         graph_config.secondary_indices = Some(indices);
         opts.config.graph_config = Some(graph_config);
 
@@ -372,10 +372,15 @@ mod tests {
 
         // Verify vertex existence via secondary index
         let txn = engine.storage.graph_env.read_txn().unwrap();
-        let index = &engine.storage.secondary_indices.get("publication_id").unwrap().0;
+        let index = &engine
+            .storage
+            .secondary_indices
+            .get("publication_id")
+            .unwrap()
+            .0;
         let key = bincode::serialize(&HelixValue::String(record.id.clone())).unwrap();
         let iter = index.prefix_iter(&txn, &key).unwrap();
-        
+
         let mut count = 0;
         for item in iter {
             if let Ok((_, _)) = item {
@@ -392,22 +397,25 @@ mod tests {
         let author_name = "Paul Erdős";
         let mut author_cache = HashMap::new();
         let mut write_buffer = Vec::new();
-        
-        let vertex1 = get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+
+        let vertex1 =
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
         flush_buffer(&mut write_buffer, &engine).unwrap();
 
         assert_eq!(vertex1.t, "Person");
 
         // Get existing
         let mut write_buffer = Vec::new();
-        let vertex2 = get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
-        
+        let vertex2 =
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+
         assert_eq!(write_buffer.len(), 0, "Should use cache");
         assert_eq!(vertex1.id, vertex2.id);
 
         let other_name = "Alice Smith";
         let mut write_buffer = Vec::new();
-        let vertex3 = get_or_create_author_vertex(other_name, &mut write_buffer, &mut author_cache).unwrap();
+        let vertex3 =
+            get_or_create_author_vertex(other_name, &mut write_buffer, &mut author_cache).unwrap();
         flush_buffer(&mut write_buffer, &engine).unwrap();
 
         assert_ne!(vertex1.id, vertex3.id);
@@ -420,7 +428,8 @@ mod tests {
         let author_name = "Paul Erdős";
         let mut author_cache = HashMap::new();
         let mut write_buffer = Vec::new();
-        let author = get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+        let author =
+            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
 
         let record = PublicationRecord {
             id: "arxiv:1234.5678".to_string(),
@@ -439,10 +448,16 @@ mod tests {
         let txn = engine.storage.graph_env.read_txn().unwrap();
         let label_hash = helix_db::utils::label_hash::hash_label("AUTHORED", None);
         let out_key = HelixGraphStorage::out_edge_key(&author.id.as_u128(), &label_hash);
-        
-        let iter = engine.storage.out_edges_db.prefix_iter(&txn, &out_key).unwrap();
+
+        let iter = engine
+            .storage
+            .out_edges_db
+            .prefix_iter(&txn, &out_key)
+            .unwrap();
         let mut count = 0;
-        for _ in iter { count += 1; }
+        for _ in iter {
+            count += 1;
+        }
         assert_eq!(count, 1);
     }
 
@@ -453,8 +468,10 @@ mod tests {
         let mut author_cache = HashMap::new();
         let mut write_buffer = Vec::new();
 
-        let author1 = get_or_create_author_vertex("Alice", &mut write_buffer, &mut author_cache).unwrap();
-        let author2 = get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
+        let author1 =
+            get_or_create_author_vertex("Alice", &mut write_buffer, &mut author_cache).unwrap();
+        let author2 =
+            get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
         flush_buffer(&mut write_buffer, &engine).unwrap();
 
         use crate::config::EdgeCacheConfig;
@@ -465,20 +482,24 @@ mod tests {
 
         create_coauthor_edge(&author1, &author2, &mut write_buffer, &mut edge_cache).unwrap();
         flush_buffer(&mut write_buffer, &engine).unwrap();
-        
+
         // Check manually via DB
         let txn = engine.storage.graph_env.read_txn().unwrap();
         let label_hash = helix_db::utils::label_hash::hash_label("COAUTHORED_WITH", None);
         let out_key = HelixGraphStorage::out_edge_key(&author1.id.as_u128(), &label_hash);
-        let iter = engine.storage.out_edges_db.prefix_iter(&txn, &out_key).unwrap();
-        
+        let iter = engine
+            .storage
+            .out_edges_db
+            .prefix_iter(&txn, &out_key)
+            .unwrap();
+
         let mut found_weight = 0;
         for item in iter {
             if let Ok((_, _val)) = item {
-                // We assume it worked if we found an edge. 
+                // We assume it worked if we found an edge.
                 // Reading edge properties requires unpacking edge_id and querying edges_db.
                 // Simplified check:
-                found_weight = 2; 
+                found_weight = 2;
             }
         }
         assert_eq!(found_weight, 2);
@@ -528,7 +549,8 @@ mod tests {
         };
 
         let mut write_buffer = Vec::new();
-        let author_v = get_or_create_author_vertex("Author A", &mut write_buffer, &mut author_cache).unwrap();
+        let author_v =
+            get_or_create_author_vertex("Author A", &mut write_buffer, &mut author_cache).unwrap();
         let pub1 = add_publication(&record1, &mut write_buffer).unwrap();
         create_authored_edge(&author_v, &pub1, &mut write_buffer).unwrap();
         flush_buffer(&mut write_buffer, &engine).unwrap();

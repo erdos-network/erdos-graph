@@ -150,7 +150,14 @@ pub async fn orchestrate_scraping_and_ingestion(
         ));
 
         // Pass sources list to run_scrape
-        run_scrape(chunk_start, chunk_end, sources.clone(), datastore.clone(), config).await?;
+        run_scrape(
+            chunk_start,
+            chunk_end,
+            sources.clone(),
+            datastore.clone(),
+            config,
+        )
+        .await?;
 
         // Update checkpoints for all sources that were processed
         for src in &sources {

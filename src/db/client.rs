@@ -1,6 +1,6 @@
-use helix_db::helix_engine::traversal_core::{HelixGraphEngine, HelixGraphEngineOpts};
-use helix_db::helix_engine::traversal_core::config::GraphConfig;
 use helix_db::helix_engine::storage_core::version_info::VersionInfo;
+use helix_db::helix_engine::traversal_core::config::GraphConfig;
+use helix_db::helix_engine::traversal_core::{HelixGraphEngine, HelixGraphEngineOpts};
 use helix_db::helix_engine::types::SecondaryIndex;
 use std::path::Path;
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 pub fn init_datastore(path: &Path) -> Result<Arc<HelixGraphEngine>, Box<dyn std::error::Error>> {
     let mut opts = HelixGraphEngineOpts::default();
     opts.path = path.to_string_lossy().to_string();
-    
+
     // Configure secondary indices
     let indices = vec![
         SecondaryIndex::Index("year".to_string()),
@@ -18,7 +18,7 @@ pub fn init_datastore(path: &Path) -> Result<Arc<HelixGraphEngine>, Box<dyn std:
         SecondaryIndex::Index("publication_id".to_string()),
         SecondaryIndex::Index("name".to_string()),
     ];
-    
+
     let mut graph_config = GraphConfig::default();
     graph_config.secondary_indices = Some(indices);
     opts.config.graph_config = Some(graph_config);

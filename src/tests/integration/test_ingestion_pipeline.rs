@@ -6,10 +6,10 @@
 use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
 use crate::db::ingestion::{get_checkpoint, orchestrate_scraping_and_ingestion, set_checkpoint};
 use chrono::{Duration, Utc};
-use tempfile::TempDir;
-use helix_db::helix_engine::traversal_core::HelixGraphEngineOpts;
 use helix_db::helix_engine::traversal_core::HelixGraphEngine;
+use helix_db::helix_engine::traversal_core::HelixGraphEngineOpts;
 use std::sync::Arc;
+use tempfile::TempDir;
 
 #[cfg(test)]
 mod tests {
@@ -19,15 +19,15 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test_db.helix");
         std::fs::create_dir_all(&db_path).unwrap();
-        
+
         // Initialize Helix datastore
         let mut opts = HelixGraphEngineOpts::default();
         opts.path = db_path.to_string_lossy().to_string();
-        
+
         // We leak the temp_dir to keep the files for the duration of the test logic
         // In a real test we might want better cleanup, but tempfile cleans up when the object drops.
         // Here we just want the path.
-        std::mem::forget(temp_dir); 
+        std::mem::forget(temp_dir);
 
         Arc::new(HelixGraphEngine::new(opts).unwrap())
     }
@@ -56,7 +56,7 @@ mod tests {
                 arxiv: Default::default(),
             },
             ingestion: IngestionConfig {
-                chunk_size_days: 1, 
+                chunk_size_days: 1,
                 initial_start_date: (Utc::now() - Duration::days(2)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
@@ -72,8 +72,7 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("initial", sources.clone(), database, &config)
-                .await;
+            orchestrate_scraping_and_ingestion("initial", sources.clone(), database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -124,8 +123,7 @@ mod tests {
         set_checkpoint("dblp", checkpoint_date, &checkpoint_dir)?;
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
-                .await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -160,7 +158,7 @@ mod tests {
             ingestion: IngestionConfig {
                 chunk_size_days: 7,
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
-                weekly_days: 1, 
+                weekly_days: 1,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
             },
             deduplication: DeduplicationConfig {
@@ -174,8 +172,7 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
-                .await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
 
         let arxiv_checkpoint = get_checkpoint("arxiv", &checkpoint_dir)?;
         let dblp_checkpoint = get_checkpoint("dblp", &checkpoint_dir)?;
@@ -230,9 +227,13 @@ mod tests {
             "Checkpoint should not exist initially"
         );
 
-        let result1 =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database.clone(), &config)
-                .await;
+        let result1 = orchestrate_scraping_and_ingestion(
+            "weekly",
+            sources.clone(),
+            database.clone(),
+            &config,
+        )
+        .await;
         assert!(result1.is_ok(), "First run failed: {:?}", result1.err());
 
         let checkpoint_after_first = get_checkpoint("arxiv", &checkpoint_dir)?;
@@ -243,8 +244,7 @@ mod tests {
         let first_checkpoint = checkpoint_after_first.unwrap();
 
         let result2 =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
-                .await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
         assert!(result2.is_ok(), "Second run failed: {:?}", result2.err());
 
         let checkpoint_after_second = get_checkpoint("arxiv", &checkpoint_dir)?;
@@ -282,7 +282,7 @@ mod tests {
                 arxiv: Default::default(),
             },
             ingestion: IngestionConfig {
-                chunk_size_days: 1, 
+                chunk_size_days: 1,
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
@@ -298,8 +298,7 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config)
-                .await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -327,7 +326,7 @@ mod tests {
                 arxiv: Default::default(),
             },
             ingestion: IngestionConfig {
-                chunk_size_days: 365, 
+                chunk_size_days: 365,
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
@@ -346,8 +345,7 @@ mod tests {
         set_checkpoint("arxiv", recent_checkpoint, &checkpoint_dir)?;
 
         let result =
-            orchestrate_scraping_and_ingestion("full", sources.clone(), database, &config)
-                .await;
+            orchestrate_scraping_and_ingestion("full", sources.clone(), database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -364,13 +362,9 @@ mod tests {
         let sources = vec!["arxiv".to_string()];
         let config = Config::default();
 
-        let result = orchestrate_scraping_and_ingestion(
-            "invalid_mode",
-            sources.clone(),
-            database,
-            &config,
-        )
-        .await;
+        let result =
+            orchestrate_scraping_and_ingestion("invalid_mode", sources.clone(), database, &config)
+                .await;
 
         assert!(result.is_err(), "Should fail with invalid mode");
         let error_msg = result.unwrap_err().to_string();

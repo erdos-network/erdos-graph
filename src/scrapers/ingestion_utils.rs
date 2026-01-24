@@ -3,18 +3,18 @@ use crate::db::ingestion::PublicationRecord;
 use crate::db::schema::{GraphEdge, GraphVertex};
 use crate::logger;
 use crate::scrapers::cache::{DeduplicationCache, EdgeCacheSystem, normalize_author};
-use helix_db::helix_engine::traversal_core::HelixGraphEngine;
-use helix_db::helix_engine::storage_core::HelixGraphStorage;
-use helix_db::utils::items::{Node, Edge};
-use helix_db::protocol::value::Value as HelixValue;
-use helix_db::utils::properties::ImmutablePropertiesMap;
+use bumpalo::Bump;
 use heed3::PutFlags;
+use helix_db::helix_engine::storage_core::HelixGraphStorage;
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
+use helix_db::protocol::value::Value as HelixValue;
+use helix_db::utils::items::{Edge, Node};
+use helix_db::utils::properties::ImmutablePropertiesMap;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
-use bumpalo::Bump;
 
 /// Represents a buffered write operation for the database.
 #[derive(Debug, Clone)]
@@ -82,40 +82,44 @@ impl IngestionContext {
         for &(u, v) in edge_keys {
             if self.edge_cache.get((u, v)).is_none() {
                 let out_key = HelixGraphStorage::out_edge_key(&u, &label_hash);
-                
-                 if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
-                     for item in iter {
-                         if let Ok((_, val_bytes)) = item {
-                             if val_bytes.len() >= 32 {
-                                 let mut to_node_bytes = [0u8; 16];
-                                 to_node_bytes.copy_from_slice(&val_bytes[16..32]);
-                                 let to_node_id = u128::from_be_bytes(to_node_bytes);
-                                 
-                                 if to_node_id == v {
-                                     let mut edge_id_bytes = [0u8; 16];
-                                     edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
-                                     let edge_id = u128::from_be_bytes(edge_id_bytes);
-                                     
-                                     if let Ok(Some(edge_bytes)) = engine.storage.edges_db.get(&txn, &edge_id) {
-                                         if let Ok(edge) = Edge::from_bincode_bytes(edge_id, &edge_bytes, &arena) {
-                                             if let Some(props) = edge.properties {
-                                                 if let Some(w_val) = props.get("weight") {
-                                                     let weight = match w_val {
-                                                         HelixValue::U64(w) => *w,
-                                                         HelixValue::I64(w) => *w as u64,
-                                                         HelixValue::F64(w) => *w as u64,
-                                                         _ => 1,
-                                                     };
-                                                     self.edge_cache.put((u, v), weight);
-                                                 }
-                                             }
-                                         }
-                                     }
-                                 }
-                             }
-                         }
-                     }
-                 }
+
+                if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
+                    for item in iter {
+                        if let Ok((_, val_bytes)) = item {
+                            if val_bytes.len() >= 32 {
+                                let mut to_node_bytes = [0u8; 16];
+                                to_node_bytes.copy_from_slice(&val_bytes[16..32]);
+                                let to_node_id = u128::from_be_bytes(to_node_bytes);
+
+                                if to_node_id == v {
+                                    let mut edge_id_bytes = [0u8; 16];
+                                    edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
+                                    let edge_id = u128::from_be_bytes(edge_id_bytes);
+
+                                    if let Ok(Some(edge_bytes)) =
+                                        engine.storage.edges_db.get(&txn, &edge_id)
+                                    {
+                                        if let Ok(edge) =
+                                            Edge::from_bincode_bytes(edge_id, &edge_bytes, &arena)
+                                        {
+                                            if let Some(props) = edge.properties {
+                                                if let Some(w_val) = props.get("weight") {
+                                                    let weight = match w_val {
+                                                        HelixValue::U64(w) => *w,
+                                                        HelixValue::I64(w) => *w as u64,
+                                                        HelixValue::F64(w) => *w as u64,
+                                                        _ => 1,
+                                                    };
+                                                    self.edge_cache.put((u, v), weight);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -137,14 +141,17 @@ fn json_to_helix_value(v: &Value) -> HelixValue {
             } else {
                 HelixValue::F64(0.0)
             }
-        },
+        }
         Value::String(s) => HelixValue::String(s.clone()),
         Value::Array(arr) => {
             let vec: Vec<HelixValue> = arr.iter().map(json_to_helix_value).collect();
             HelixValue::Array(vec)
-        },
+        }
         Value::Object(obj) => {
-            let map: HashMap<String, HelixValue> = obj.iter().map(|(k, v)| (k.clone(), json_to_helix_value(v))).collect();
+            let map: HashMap<String, HelixValue> = obj
+                .iter()
+                .map(|(k, v)| (k.clone(), json_to_helix_value(v)))
+                .collect();
             HelixValue::Object(map)
         }
     }
@@ -163,15 +170,17 @@ fn value_to_string(v: &HelixValue) -> String {
 
 /// Helper to convert our generic GraphVertex to Helix Node
 fn to_helix_node<'arena>(v: &GraphVertex, arena: &'arena Bump) -> Node<'arena> {
-    let items = v.props.iter()
+    let items = v
+        .props
+        .iter()
         .map(|(k, val)| (arena.alloc_str(k) as &str, json_to_helix_value(val)));
-    
+
     let props = if v.props.is_empty() {
         None
     } else {
         Some(ImmutablePropertiesMap::new(v.props.len(), items, arena))
     };
-    
+
     Node {
         id: v.id.as_u128(),
         label: arena.alloc_str(&v.t),
@@ -182,7 +191,9 @@ fn to_helix_node<'arena>(v: &GraphVertex, arena: &'arena Bump) -> Node<'arena> {
 
 /// Helper to convert our generic GraphEdge to Helix Edge
 fn to_helix_edge<'arena>(e: &GraphEdge, id: u128, arena: &'arena Bump) -> Edge<'arena> {
-    let items = e.props.iter()
+    let items = e
+        .props
+        .iter()
         .map(|(k, val)| (arena.alloc_str(k) as &str, json_to_helix_value(val)));
 
     let props = if e.props.is_empty() {
@@ -220,41 +231,57 @@ pub(crate) fn flush_buffer(
             WriteOperation::CreateVertex(v) => {
                 let node = to_helix_node(&v, &arena);
                 if let Ok(bytes) = bincode::serialize(&node) {
-                     // Use empty flags to allow unsorted inserts (LMDB handles sorting)
-                     engine.storage.nodes_db.put_with_flags(&mut wtxn, PutFlags::empty(), &node.id, &bytes)?;
-                     
-                     for (idx_name, (db, _)) in &engine.storage.secondary_indices {
-                         if let Some(val) = node.get_property(idx_name) {
-                             let val_str = value_to_string(val);
-                             if let Ok(key_bytes) = bincode::serialize(&HelixValue::String(val_str)) {
-                                  // For secondary indices (DUP_SORT), empty flags adds to the set
-                                  db.put_with_flags(&mut wtxn, PutFlags::empty(), &key_bytes, &node.id)?;
-                             }
-                         }
-                     }
+                    // Use empty flags to allow unsorted inserts (LMDB handles sorting)
+                    engine.storage.nodes_db.put_with_flags(
+                        &mut wtxn,
+                        PutFlags::empty(),
+                        &node.id,
+                        &bytes,
+                    )?;
+
+                    for (idx_name, (db, _)) in &engine.storage.secondary_indices {
+                        if let Some(val) = node.get_property(idx_name) {
+                            let val_str = value_to_string(val);
+                            if let Ok(key_bytes) = bincode::serialize(&HelixValue::String(val_str))
+                            {
+                                // For secondary indices (DUP_SORT), empty flags adds to the set
+                                db.put_with_flags(
+                                    &mut wtxn,
+                                    PutFlags::empty(),
+                                    &key_bytes,
+                                    &node.id,
+                                )?;
+                            }
+                        }
+                    }
                 }
-            },
+            }
             WriteOperation::CreateEdge(e) => {
                 let edge_id = uuid::Uuid::now_v7().as_u128();
                 let edge = to_helix_edge(&e, edge_id, &arena);
-                
+
                 if let Ok(bytes) = bincode::serialize(&edge) {
-                    engine.storage.edges_db.put_with_flags(&mut wtxn, PutFlags::empty(), &edge.id, &bytes)?;
-                    
+                    engine.storage.edges_db.put_with_flags(
+                        &mut wtxn,
+                        PutFlags::empty(),
+                        &edge.id,
+                        &bytes,
+                    )?;
+
                     let label_hash = helix_db::utils::label_hash::hash_label(edge.label, None);
-                    
+
                     engine.storage.out_edges_db.put_with_flags(
                         &mut wtxn,
                         PutFlags::empty(),
                         &HelixGraphStorage::out_edge_key(&edge.from_node, &label_hash),
-                        &HelixGraphStorage::pack_edge_data(&edge.id, &edge.to_node)
+                        &HelixGraphStorage::pack_edge_data(&edge.id, &edge.to_node),
                     )?;
-                    
+
                     engine.storage.in_edges_db.put_with_flags(
                         &mut wtxn,
                         PutFlags::empty(),
                         &HelixGraphStorage::in_edge_key(&edge.to_node, &label_hash),
-                        &HelixGraphStorage::pack_edge_data(&edge.id, &edge.from_node)
+                        &HelixGraphStorage::pack_edge_data(&edge.id, &edge.from_node),
                     )?;
                 }
             }
@@ -394,8 +421,7 @@ pub(crate) fn get_or_create_author_vertex(
     }
 
     let person_type = crate::db::schema::PERSON_TYPE;
-    let v = GraphVertex::new(person_type)
-        .property("name", name.to_string());
+    let v = GraphVertex::new(person_type).property("name", name.to_string());
 
     write_buffer.push(WriteOperation::CreateVertex(v.clone()));
 
@@ -455,14 +481,12 @@ pub(crate) fn create_coauthor_edge(
     let key = (u.id.as_u128(), v.id.as_u128());
 
     let mut add_ops = |weight: u64| -> Result<(), Box<dyn std::error::Error>> {
-         let edge1 = GraphEdge::new(u.id, v.id, edge_type)
-            .property("weight", weight);
-         write_buffer.push(WriteOperation::CreateEdge(edge1));
-         
-         let edge2 = GraphEdge::new(v.id, u.id, edge_type)
-            .property("weight", weight);
-         write_buffer.push(WriteOperation::CreateEdge(edge2));
-         Ok(())
+        let edge1 = GraphEdge::new(u.id, v.id, edge_type).property("weight", weight);
+        write_buffer.push(WriteOperation::CreateEdge(edge1));
+
+        let edge2 = GraphEdge::new(v.id, u.id, edge_type).property("weight", weight);
+        write_buffer.push(WriteOperation::CreateEdge(edge2));
+        Ok(())
     };
 
     if let Some(current_weight) = edge_cache.get(key) {
@@ -486,7 +510,7 @@ pub(crate) fn create_coauthor_edge(
 
 /// Helper to check if publication exists in DB (using Bloom filter as first line of defense)
 #[allow(dead_code)]
-pub fn publication_exists(
+pub(crate) fn publication_exists(
     record: &PublicationRecord,
     engine: &Arc<HelixGraphEngine>,
     config: &Config,

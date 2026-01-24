@@ -2,8 +2,8 @@ use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig}
 use crate::scrapers::scraping_orchestrator::run_scrape;
 use chrono::{Duration, Utc};
 use helix_db::helix_engine::traversal_core::{HelixGraphEngine, HelixGraphEngineOpts};
-use tempfile::TempDir;
 use std::sync::Arc;
+use tempfile::TempDir;
 
 #[cfg(test)]
 mod tests {
@@ -63,7 +63,7 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let db_path = temp_dir.path().join("test_db_dblp.helix");
         std::fs::create_dir_all(&db_path)?;
-        
+
         let mut opts = HelixGraphEngineOpts::default();
         opts.path = db_path.to_string_lossy().to_string();
         let engine = Arc::new(HelixGraphEngine::new(opts)?);
