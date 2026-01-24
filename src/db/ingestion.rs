@@ -5,9 +5,10 @@
 
 use crate::logger;
 use chrono::{DateTime, Duration, Utc};
-use indradb::{Database, Datastore};
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Type alias for date range chunks: a vector of (start, end) date tuples.
 type DateRangeChunks = Vec<(DateTime<Utc>, DateTime<Utc>)>;
@@ -94,7 +95,7 @@ pub fn set_checkpoint(
 /// * `mode` - Processing mode: "initial" (scrape last 10 years), "weekly" (incremental updates),
 ///   or "full" (scrape everything from beginning)
 /// * `sources` - List of source identifiers to scrape (e.g., ["arxiv", "dblp", "zbmath"])
-/// * `datastore` - Mutable reference to the IndraDB datastore
+/// * `datastore` - Arc-wrapped HelixGraphEngine
 /// * `config` - Configuration containing ingestion settings
 ///
 /// # Returns
@@ -103,7 +104,7 @@ pub fn set_checkpoint(
 pub async fn orchestrate_scraping_and_ingestion(
     mode: &str,
     sources: Vec<String>,
-    datastore: &mut Database<impl Datastore>,
+    datastore: Arc<HelixGraphEngine>,
     config: &crate::config::Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::scrapers::scraping_orchestrator::run_scrape;
@@ -149,7 +150,7 @@ pub async fn orchestrate_scraping_and_ingestion(
         ));
 
         // Pass sources list to run_scrape
-        run_scrape(chunk_start, chunk_end, sources.clone(), datastore, config).await?;
+        run_scrape(chunk_start, chunk_end, sources.clone(), datastore.clone(), config).await?;
 
         // Update checkpoints for all sources that were processed
         for src in &sources {

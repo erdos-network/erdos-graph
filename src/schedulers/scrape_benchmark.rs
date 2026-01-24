@@ -6,10 +6,9 @@
 use crate::config::Config;
 use crate::db::ingestion::orchestrate_scraping_and_ingestion;
 use crate::logger;
-use indradb::{Database, Datastore};
+use helix_db::helix_engine::traversal_core::HelixGraphEngine;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
 
 use tempfile::TempDir;
 
@@ -23,14 +22,14 @@ use tempfile::TempDir;
 /// # Arguments
 /// * `num_weeks` - Number of weeks to scrape back
 /// * `config` - Base application configuration
-/// * `datastore` - Arc-wrapped Mutex of the IndraDB datastore
+/// * `datastore` - Arc-wrapped HelixGraphEngine
 ///
 /// # Returns
 /// `Ok(Duration)` containing the elapsed time, or an error if execution fails
-pub async fn run_benchmark<D: Datastore + Send + 'static>(
+pub async fn run_benchmark(
     num_weeks: u64,
     mut config: Config,
-    datastore: Arc<Mutex<Database<D>>>,
+    datastore: Arc<HelixGraphEngine>,
 ) -> Result<std::time::Duration, Box<dyn std::error::Error>> {
     let sources = config.scrapers.enabled.clone();
     logger::info(&format!(
@@ -47,13 +46,9 @@ pub async fn run_benchmark<D: Datastore + Send + 'static>(
     // Override weekly_days in config for the benchmark
     config.ingestion.weekly_days = num_weeks * 7;
 
-    // Acquire lock to ensure exclusive access
-    // This acts as the queue: if another job is running, we wait here.
-    let mut db = datastore.lock().await;
-
     let start_time = Instant::now();
 
-    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), &mut *db, &config).await {
+    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), datastore, &config).await {
         Ok(_) => {
             let duration = start_time.elapsed();
             logger::info(&format!(
