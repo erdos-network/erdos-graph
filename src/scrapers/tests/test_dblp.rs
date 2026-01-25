@@ -4,7 +4,7 @@ mod tests {
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::dblp;
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue}; // Added imports
-    use chrono::{TimeZone, Utc};
+    use chrono::{Datelike, TimeZone, Utc};
     use mockito::Server;
     use serde_json::json;
 
@@ -586,16 +586,12 @@ mod tests {
             .create_async()
             .await;
 
-        // Change to temp directory for cache
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(temp_dir.path()).unwrap();
-
         let config = DblpSourceConfig {
             base_url: server.url(),
             page_size: 100,
             delay_ms: 0,
             enable_cache: true,
-            cache_dir: ".dblp_cache".to_string(),
+            cache_dir: cache_dir.to_string_lossy().to_string(), // Use absolute path
         };
 
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
@@ -627,9 +623,6 @@ mod tests {
 
         // Verify cache directory was created
         assert!(cache_dir.exists());
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).unwrap();
     }
 
     #[tokio::test]
@@ -800,5 +793,103 @@ mod tests {
         let records = result.unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].id, "unknown");
+    }
+
+    #[tokio::test]
+    async fn test_dblp_cache_disabled_for_active_years() {
+        use tempfile::TempDir;
+
+        let mut server = Server::new_async().await;
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join(".dblp_cache");
+
+        // Current year (2026 based on system date in context)
+        let current_year = Utc::now().year();
+
+        let record_v1 = json!({
+            "info": {
+                "title": "Paper V1",
+                "authors": {"author": ["Author One"]},
+                "year": current_year.to_string(),
+                "key": "test/key1"
+            }
+        });
+
+        let record_v2 = json!({
+            "info": {
+                "title": "Paper V2",
+                "authors": {"author": ["Author Two"]},
+                "year": current_year.to_string(),
+                "key": "test/key2"
+            }
+        });
+
+        let response_v1 = create_dblp_json_response(&[record_v1]);
+        let response_v2 = create_dblp_json_response(&[record_v2]);
+
+        // First request returns V1
+        let _mock1 = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex(format!(
+                "q=year(:|%3A){}.*",
+                current_year
+            )))
+            .with_status(200)
+            .with_body(response_v1)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let start = Utc.with_ymd_and_hms(current_year, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc
+            .with_ymd_and_hms(current_year, 12, 31, 23, 59, 59)
+            .unwrap();
+
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            enable_cache: true,                                 // Cache is enabled
+            cache_dir: cache_dir.to_string_lossy().to_string(), // Use absolute path
+        };
+
+        // First scrape
+        let queue1 = ThreadSafeQueue::new(QueueConfig::default());
+        let producer1 = queue1.create_producer();
+        let result1 = dblp::scrape_range_with_config(start, end, config.clone(), producer1).await;
+        assert!(result1.is_ok());
+
+        let mut recs1 = Vec::new();
+        while let Some(r) = queue1.dequeue() {
+            recs1.push(r);
+        }
+        assert_eq!(recs1.len(), 1);
+        assert_eq!(recs1[0].title, "Paper V1");
+
+        // Mock now returns V2 (simulating new papers added)
+        let _mock2 = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Regex(format!(
+                "q=year(:|%3A){}.*",
+                current_year
+            )))
+            .with_status(200)
+            .with_body(response_v2)
+            .expect(1) // Should hit server again despite cache being enabled
+            .create_async()
+            .await;
+
+        // Second scrape - should NOT use cache for active year
+        let queue2 = ThreadSafeQueue::new(QueueConfig::default());
+        let producer2 = queue2.create_producer();
+        let result2 = dblp::scrape_range_with_config(start, end, config, producer2).await;
+        assert!(result2.is_ok());
+
+        let mut recs2 = Vec::new();
+        while let Some(r) = queue2.dequeue() {
+            recs2.push(r);
+        }
+        assert_eq!(recs2.len(), 1);
+        assert_eq!(recs2[0].title, "Paper V2"); // Should get fresh data, not cached V1
     }
 }
