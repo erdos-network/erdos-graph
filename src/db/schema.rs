@@ -39,7 +39,7 @@ pub struct GraphVertex {
 impl GraphVertex {
     pub fn new(t: &str) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             t: t.to_string(),
             props: HashMap::new(),
         }

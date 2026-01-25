@@ -79,37 +79,43 @@ impl IngestionContext {
         use crate::db::schema::COAUTHORED_WITH_TYPE;
         let label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, None);
 
+        // Optimization: Group by source to avoid creating an iterator for every pair
+        let mut adjacency_requests: HashMap<u128, HashSet<u128>> = HashMap::new();
         for &(u, v) in edge_keys {
             if self.edge_cache.get((u, v)).is_none() {
-                let out_key = HelixGraphStorage::out_edge_key(&u, &label_hash);
+                adjacency_requests.entry(u).or_default().insert(v);
+            }
+        }
 
-                if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
-                    for (_, val_bytes) in iter.flatten() {
-                        if val_bytes.len() >= 32 {
-                            let mut to_node_bytes = [0u8; 16];
-                            to_node_bytes.copy_from_slice(&val_bytes[16..32]);
-                            let to_node_id = u128::from_be_bytes(to_node_bytes);
+        for (u, targets) in adjacency_requests {
+            let out_key = HelixGraphStorage::out_edge_key(&u, &label_hash);
 
-                            if to_node_id == v {
-                                let mut edge_id_bytes = [0u8; 16];
-                                edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
-                                let edge_id = u128::from_be_bytes(edge_id_bytes);
+            if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
+                for (_, val_bytes) in iter.flatten() {
+                    if val_bytes.len() >= 32 {
+                        let mut to_node_bytes = [0u8; 16];
+                        to_node_bytes.copy_from_slice(&val_bytes[16..32]);
+                        let to_node_id = u128::from_be_bytes(to_node_bytes);
 
-                                if let Ok(Some(edge_bytes)) =
-                                    engine.storage.edges_db.get(&txn, &edge_id)
-                                    && let Ok(edge) =
-                                        Edge::from_bincode_bytes(edge_id, edge_bytes, &arena)
-                                    && let Some(props) = edge.properties
-                                    && let Some(w_val) = props.get("weight")
-                                {
-                                    let weight = match w_val {
-                                        HelixValue::U64(w) => *w,
-                                        HelixValue::I64(w) => *w as u64,
-                                        HelixValue::F64(w) => *w as u64,
-                                        _ => 1,
-                                    };
-                                    self.edge_cache.put((u, v), weight);
-                                }
+                        if targets.contains(&to_node_id) {
+                            let mut edge_id_bytes = [0u8; 16];
+                            edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
+                            let edge_id = u128::from_be_bytes(edge_id_bytes);
+
+                            if let Ok(Some(edge_bytes)) =
+                                engine.storage.edges_db.get(&txn, &edge_id)
+                                && let Ok(edge) =
+                                    Edge::from_bincode_bytes(edge_id, edge_bytes, &arena)
+                                && let Some(props) = edge.properties
+                                && let Some(w_val) = props.get("weight")
+                            {
+                                let weight = match w_val {
+                                    HelixValue::U64(w) => *w,
+                                    HelixValue::I64(w) => *w as u64,
+                                    HelixValue::F64(w) => *w as u64,
+                                    _ => 1,
+                                };
+                                self.edge_cache.put((u, to_node_id), weight);
                             }
                         }
                     }
@@ -225,10 +231,10 @@ pub(crate) fn flush_buffer(
             WriteOperation::CreateVertex(v) => {
                 let node = to_helix_node(&v, &arena);
                 if let Ok(bytes) = bincode::serialize(&node) {
-                    // Use empty flags to allow unsorted inserts (LMDB handles sorting)
+                    // Use APPEND flag for sorted inserts (LMDB optimization)
                     engine.storage.nodes_db.put_with_flags(
                         &mut wtxn,
-                        PutFlags::empty(),
+                        PutFlags::APPEND,
                         &node.id,
                         &bytes,
                     )?;
@@ -255,25 +261,27 @@ pub(crate) fn flush_buffer(
                 let edge = to_helix_edge(&e, edge_id, &arena);
 
                 if let Ok(bytes) = bincode::serialize(&edge) {
+                    // Use APPEND flag for sorted inserts (LMDB optimization)
                     engine.storage.edges_db.put_with_flags(
                         &mut wtxn,
-                        PutFlags::empty(),
+                        PutFlags::APPEND,
                         &edge.id,
                         &bytes,
                     )?;
 
                     let label_hash = helix_db::utils::label_hash::hash_label(edge.label, None);
 
+                    // Use APPEND_DUP because edge_id (part of value) is monotonic
                     engine.storage.out_edges_db.put_with_flags(
                         &mut wtxn,
-                        PutFlags::empty(),
+                        PutFlags::APPEND_DUP,
                         &HelixGraphStorage::out_edge_key(&edge.from_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.to_node),
                     )?;
 
                     engine.storage.in_edges_db.put_with_flags(
                         &mut wtxn,
-                        PutFlags::empty(),
+                        PutFlags::APPEND_DUP,
                         &HelixGraphStorage::in_edge_key(&edge.to_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.from_node),
                     )?;
