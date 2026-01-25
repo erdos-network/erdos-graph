@@ -288,10 +288,12 @@ pub async fn scrape_range_with_config(
 
             logger::debug(&format!("Fetching DBLP URL: {}", url));
 
+            // Disable cache for active years to ensure fresh data
+            let use_cache = config.enable_cache && !is_active_year;
+
             // Use cached fetch if available
             let body_text =
-                match fetch_url_cached(&client, &url, config.enable_cache, &config.cache_dir).await
-                {
+                match fetch_url_cached(&client, &url, use_cache, &config.cache_dir).await {
                     Ok(text) => text,
                     Err(e) => {
                         logger::error(&format!("Failed to fetch URL {}: {}", url, e));
