@@ -37,7 +37,7 @@ impl IngestionContext {
             dedup_cache: DeduplicationCache::new(config.deduplication.bloom_filter_size),
             author_cache: HashMap::new(),
             edge_cache: EdgeCacheSystem::new(config.edge_cache.clone()),
-            write_buffer: Vec::with_capacity(1000),
+            write_buffer: Vec::with_capacity(5000),
         }
     }
 
@@ -231,7 +231,6 @@ pub(crate) fn flush_buffer(
             WriteOperation::CreateVertex(v) => {
                 let node = to_helix_node(&v, &arena);
                 if let Ok(bytes) = bincode::serialize(&node) {
-                    // Use APPEND flag for sorted inserts (LMDB optimization)
                     engine.storage.nodes_db.put_with_flags(
                         &mut wtxn,
                         PutFlags::APPEND,
@@ -244,7 +243,6 @@ pub(crate) fn flush_buffer(
                             let val_str = value_to_string(val);
                             if let Ok(key_bytes) = bincode::serialize(&HelixValue::String(val_str))
                             {
-                                // For secondary indices (DUP_SORT), empty flags adds to the set
                                 db.put_with_flags(
                                     &mut wtxn,
                                     PutFlags::empty(),
@@ -261,7 +259,6 @@ pub(crate) fn flush_buffer(
                 let edge = to_helix_edge(&e, edge_id, &arena);
 
                 if let Ok(bytes) = bincode::serialize(&edge) {
-                    // Use APPEND flag for sorted inserts (LMDB optimization)
                     engine.storage.edges_db.put_with_flags(
                         &mut wtxn,
                         PutFlags::APPEND,
@@ -271,17 +268,14 @@ pub(crate) fn flush_buffer(
 
                     let label_hash = helix_db::utils::label_hash::hash_label(edge.label, None);
 
-                    // Use APPEND_DUP because edge_id (part of value) is monotonic
-                    engine.storage.out_edges_db.put_with_flags(
+                    engine.storage.out_edges_db.put(
                         &mut wtxn,
-                        PutFlags::APPEND_DUP,
                         &HelixGraphStorage::out_edge_key(&edge.from_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.to_node),
                     )?;
 
-                    engine.storage.in_edges_db.put_with_flags(
+                    engine.storage.in_edges_db.put(
                         &mut wtxn,
-                        PutFlags::APPEND_DUP,
                         &HelixGraphStorage::in_edge_key(&edge.to_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.from_node),
                     )?;
@@ -482,30 +476,34 @@ pub(crate) fn create_coauthor_edge(
 
     let key = (u.id.as_u128(), v.id.as_u128());
 
-    let mut add_ops = |weight: u64| -> Result<(), Box<dyn std::error::Error>> {
-        let edge1 = GraphEdge::new(u.id, v.id, edge_type).property("weight", weight);
-        write_buffer.push(WriteOperation::CreateEdge(edge1));
+    let cached_weight = edge_cache.get(key);
 
-        let edge2 = GraphEdge::new(v.id, u.id, edge_type).property("weight", weight);
-        write_buffer.push(WriteOperation::CreateEdge(edge2));
-        Ok(())
-    };
-
-    if let Some(current_weight) = edge_cache.get(key) {
+    if let Some(current_weight) = cached_weight {
         let new_weight = current_weight + 1;
         edge_cache.put(key, new_weight);
-        add_ops(new_weight)?;
-        return Ok(());
-    }
 
-    if edge_cache.exists(key) {
+        let edge1 = GraphEdge::new(u.id, v.id, edge_type).property("weight", new_weight);
+        write_buffer.push(WriteOperation::CreateEdge(edge1));
+
+        let edge2 = GraphEdge::new(v.id, u.id, edge_type).property("weight", new_weight);
+        write_buffer.push(WriteOperation::CreateEdge(edge2));
+    } else if edge_cache.exists(key) {
         edge_cache.put(key, 2);
-        add_ops(2)?;
-        return Ok(());
-    }
 
-    edge_cache.put(key, 1);
-    add_ops(1)?;
+        let edge1 = GraphEdge::new(u.id, v.id, edge_type).property("weight", 2);
+        write_buffer.push(WriteOperation::CreateEdge(edge1));
+
+        let edge2 = GraphEdge::new(v.id, u.id, edge_type).property("weight", 2);
+        write_buffer.push(WriteOperation::CreateEdge(edge2));
+    } else {
+        edge_cache.put(key, 1);
+
+        let edge1 = GraphEdge::new(u.id, v.id, edge_type).property("weight", 1);
+        write_buffer.push(WriteOperation::CreateEdge(edge1));
+
+        let edge2 = GraphEdge::new(v.id, u.id, edge_type).property("weight", 1);
+        write_buffer.push(WriteOperation::CreateEdge(edge2));
+    }
 
     Ok(())
 }
