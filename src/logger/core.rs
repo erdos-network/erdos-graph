@@ -12,9 +12,11 @@
 //!
 
 use crossbeam_channel::{Sender, bounded};
+use serde::{Deserialize, Serialize};
 use std::thread;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -52,25 +54,40 @@ pub trait Logger: Send + Sync + 'static {
     /// Flush any buffered records.
     fn flush(&self) {}
 
+    /// Get the current minimum log level.
+    fn min_level(&self) -> LogLevel {
+        LogLevel::Info
+    }
+
     /// Convenience: trace level.
     fn trace(&self, message: &str) {
-        self.log(LogLevel::Trace, message);
+        if self.min_level() <= LogLevel::Trace {
+            self.log(LogLevel::Trace, message);
+        }
     }
     /// Convenience: debug level.
     fn debug(&self, message: &str) {
-        self.log(LogLevel::Debug, message);
+        if self.min_level() <= LogLevel::Debug {
+            self.log(LogLevel::Debug, message);
+        }
     }
     /// Convenience: info level.
     fn info(&self, message: &str) {
-        self.log(LogLevel::Info, message);
+        if self.min_level() <= LogLevel::Info {
+            self.log(LogLevel::Info, message);
+        }
     }
     /// Convenience: warn level.
     fn warn(&self, message: &str) {
-        self.log(LogLevel::Warn, message);
+        if self.min_level() <= LogLevel::Warn {
+            self.log(LogLevel::Warn, message);
+        }
     }
     /// Convenience: error level.
     fn error(&self, message: &str) {
-        self.log(LogLevel::Error, message);
+        if self.min_level() <= LogLevel::Error {
+            self.log(LogLevel::Error, message);
+        }
     }
 }
 
@@ -101,10 +118,11 @@ enum LogMsg {
 #[derive(Debug, Clone)]
 pub struct AsyncLogger {
     sender: Sender<LogMsg>,
+    min_level: LogLevel,
 }
 
 impl AsyncLogger {
-    pub fn new() -> Self {
+    pub fn new(min_level: LogLevel) -> Self {
         let (tx, rx) = bounded(2048);
 
         thread::spawn(move || {
@@ -129,18 +147,24 @@ impl AsyncLogger {
             }
         });
 
-        Self { sender: tx }
+        Self {
+            sender: tx,
+            min_level,
+        }
     }
 }
 
 impl Default for AsyncLogger {
     fn default() -> Self {
-        Self::new()
+        Self::new(LogLevel::Info)
     }
 }
 
 impl Logger for AsyncLogger {
     fn log(&self, level: LogLevel, message: &str) {
+        if level < self.min_level {
+            return;
+        }
         let ts = chrono::Utc::now().to_rfc3339();
         let _ = self.sender.send(LogMsg::Record {
             level,
@@ -154,5 +178,9 @@ impl Logger for AsyncLogger {
         if self.sender.send(LogMsg::Flush(ack_tx)).is_ok() {
             let _ = ack_rx.recv();
         }
+    }
+
+    fn min_level(&self) -> LogLevel {
+        self.min_level
     }
 }

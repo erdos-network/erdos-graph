@@ -1,5 +1,6 @@
 #![coverage(off)]
 
+use crate::logger::LogLevel;
 use serde::Deserialize;
 use std::fs;
 
@@ -12,6 +13,8 @@ pub struct Config {
     pub edge_cache: EdgeCacheConfig,
     pub heartbeat_timeout_s: u64,
     pub polling_interval_ms: u64,
+    #[serde(default = "default_log_level")]
+    pub log_level: LogLevel,
 }
 
 impl Default for Config {
@@ -23,8 +26,13 @@ impl Default for Config {
             edge_cache: EdgeCacheConfig::default(),
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
+            log_level: default_log_level(),
         }
     }
+}
+
+fn default_log_level() -> LogLevel {
+    LogLevel::Info
 }
 
 #[derive(Deserialize, Clone, Debug)]

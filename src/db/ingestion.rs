@@ -240,7 +240,7 @@ fn calculate_date_range(
 /// # Returns
 /// A vector of (chunk_start, chunk_end) tuples
 #[coverage(off)]
-fn chunk_date_range(
+pub(crate) fn chunk_date_range(
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     chunk_size_days: u64,
@@ -250,6 +250,12 @@ fn chunk_date_range(
     }
 
     let mut chunks = Vec::new();
+    // Safety check: if chunk_size_days is 0, treat it as a single chunk for the entire range
+    if chunk_size_days == 0 {
+        chunks.push((start, end));
+        return Ok(chunks);
+    }
+
     let chunk_duration = Duration::days(chunk_size_days as i64);
     let mut current_start = start;
 

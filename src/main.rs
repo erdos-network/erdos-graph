@@ -39,13 +39,13 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logger
-    init_logger(AsyncLogger::new());
-
-    let cli = Cli::parse();
-
     // Load config
     let config = load_config()?;
+
+    // Initialize logger
+    init_logger(AsyncLogger::new(config.log_level));
+
+    let cli = Cli::parse();
 
     // Initialize database
     let db_path = Path::new(&cli.db_path);
