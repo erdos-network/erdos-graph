@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/db/ingestion.rs`."><title>ingestion.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-0bd2dfd4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="erdos_graph" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (f134bbc78 2026-01-24)" data-channel="nightly" data-search-js="search-86d08462.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-f9617a14.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">erdos_graph/db/</div>ingestion.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Publication ingestion orchestration and checkpointing logic.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/db/ingestion.rs`."><title>ingestion.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="erdos_graph" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (905b92696 2026-01-31)" data-channel="nightly" data-search-js="search-fb33671b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-f9617a14.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">erdos_graph/db/</div>ingestion.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Publication ingestion orchestration and checkpointing logic.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This module handles orchestrating the scraping process, including date range calculation,
 <a href=#4 id=4 data-nosnippet>4</a>//! chunking, and checkpoint management.
@@ -240,7 +240,7 @@
 <a href=#240 id=240 data-nosnippet>240</a>/// # Returns
 <a href=#241 id=241 data-nosnippet>241</a>/// A vector of (chunk_start, chunk_end) tuples
 <a href=#242 id=242 data-nosnippet>242</a></span><span class="attr">#[coverage(off)]
-<a href=#243 id=243 data-nosnippet>243</a></span><span class="kw">fn </span>chunk_date_range(
+<a href=#243 id=243 data-nosnippet>243</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>chunk_date_range(
 <a href=#244 id=244 data-nosnippet>244</a>    start: DateTime&lt;Utc&gt;,
 <a href=#245 id=245 data-nosnippet>245</a>    end: DateTime&lt;Utc&gt;,
 <a href=#246 id=246 data-nosnippet>246</a>    chunk_size_days: u64,
@@ -250,15 +250,21 @@
 <a href=#250 id=250 data-nosnippet>250</a>    }
 <a href=#251 id=251 data-nosnippet>251</a>
 <a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">let </span><span class="kw-2">mut </span>chunks = Vec::new();
-<a href=#253 id=253 data-nosnippet>253</a>    <span class="kw">let </span>chunk_duration = Duration::days(chunk_size_days <span class="kw">as </span>i64);
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="kw">let </span><span class="kw-2">mut </span>current_start = start;
-<a href=#255 id=255 data-nosnippet>255</a>
-<a href=#256 id=256 data-nosnippet>256</a>    <span class="kw">while </span>current_start &lt; end {
-<a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>chunk_end = std::cmp::min(current_start + chunk_duration, end);
-<a href=#258 id=258 data-nosnippet>258</a>        chunks.push((current_start, chunk_end));
-<a href=#259 id=259 data-nosnippet>259</a>        current_start = chunk_end;
-<a href=#260 id=260 data-nosnippet>260</a>    }
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="comment">// Safety check: if chunk_size_days is 0, treat it as a single chunk for the entire range
+<a href=#254 id=254 data-nosnippet>254</a>    </span><span class="kw">if </span>chunk_size_days == <span class="number">0 </span>{
+<a href=#255 id=255 data-nosnippet>255</a>        chunks.push((start, end));
+<a href=#256 id=256 data-nosnippet>256</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(chunks);
+<a href=#257 id=257 data-nosnippet>257</a>    }
+<a href=#258 id=258 data-nosnippet>258</a>
+<a href=#259 id=259 data-nosnippet>259</a>    <span class="kw">let </span>chunk_duration = Duration::days(chunk_size_days <span class="kw">as </span>i64);
+<a href=#260 id=260 data-nosnippet>260</a>    <span class="kw">let </span><span class="kw-2">mut </span>current_start = start;
 <a href=#261 id=261 data-nosnippet>261</a>
-<a href=#262 id=262 data-nosnippet>262</a>    <span class="prelude-val">Ok</span>(chunks)
-<a href=#263 id=263 data-nosnippet>263</a>}
+<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">while </span>current_start &lt; end {
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="kw">let </span>chunk_end = std::cmp::min(current_start + chunk_duration, end);
+<a href=#264 id=264 data-nosnippet>264</a>        chunks.push((current_start, chunk_end));
+<a href=#265 id=265 data-nosnippet>265</a>        current_start = chunk_end;
+<a href=#266 id=266 data-nosnippet>266</a>    }
+<a href=#267 id=267 data-nosnippet>267</a>
+<a href=#268 id=268 data-nosnippet>268</a>    <span class="prelude-val">Ok</span>(chunks)
+<a href=#269 id=269 data-nosnippet>269</a>}
 </code></pre></div></section></main></body></html>
