@@ -532,6 +532,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let mut dedup_cache = DeduplicationCache::new(100);
@@ -616,6 +617,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let mut context = IngestionContext::new(&config);

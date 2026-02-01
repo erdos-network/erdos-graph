@@ -6,18 +6,18 @@
         ],
         "dblp": {
             "base_url": "https://dblp.org/search/publ/api",
-            "page_size": 1000,
+            "page_size": 5000,
             "delay_ms": 200
         },
         "arxiv": {
             "base_url": "https://export.arxiv.org/api/query",
-            "page_size": 1000,
+            "page_size": 5000,
             "channel_size": 8,
             "delay_ms": 200
         }
     },
     "ingestion": {
-        "chunk_size_days": 7,
+        "chunk_size_days": 28,
         "initial_start_date": "1930-01-01T00:00:00Z",
         "weekly_days": 7
     },
@@ -32,5 +32,6 @@
         "bloom_size": 100000000
     },
     "heartbeat_timeout_s": 30,
-    "polling_interval_ms": 100
+    "polling_interval_ms": 100,
+    "log_level": "info"
 }

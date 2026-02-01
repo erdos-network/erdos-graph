@@ -49,19 +49,28 @@ pub fn set_logger_for_tests<L: Logger>(logger: L) {
 /// Log using the global logger if set, otherwise no-op.
 pub fn log(level: LogLevel, message: &str) {
     unsafe {
-        if let Some(logger) = GLOBAL_LOGGER {
-            logger.log(level, message);
+        match GLOBAL_LOGGER {
+            Some(logger) if level >= logger.min_level() => logger.log(level, message),
+            _ => {}
         }
     }
 }
 
 /// Convenience functions
+pub fn trace(msg: &str) {
+    log(LogLevel::Trace, msg);
+}
+
 pub fn info(msg: &str) {
     log(LogLevel::Info, msg);
 }
 
 pub fn debug(msg: &str) {
     log(LogLevel::Debug, msg);
+}
+
+pub fn warn(msg: &str) {
+    log(LogLevel::Warn, msg);
 }
 
 pub fn error(msg: &str) {

@@ -70,6 +70,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let result =
@@ -118,6 +119,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let checkpoint_date = Utc::now() - Duration::hours(1);
@@ -170,6 +172,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let result =
@@ -220,6 +223,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let checkpoint_before = get_checkpoint("arxiv", &checkpoint_dir)?;
@@ -296,6 +300,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 60,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let result =
@@ -340,6 +345,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 120,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let recent_checkpoint = Utc::now() - Duration::days(1);

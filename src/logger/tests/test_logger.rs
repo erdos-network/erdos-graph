@@ -21,6 +21,10 @@ impl Logger for TestLogger {
         let mut records = self.records.lock().unwrap();
         records.push((level, message.to_string()));
     }
+
+    fn min_level(&self) -> LogLevel {
+        LogLevel::Trace
+    }
 }
 
 #[test]

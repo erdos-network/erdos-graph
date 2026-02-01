@@ -16,6 +16,6 @@ fn init_sets_global_logger() {
 #[test]
 fn async_logger_emits_json() {
     // This test is a smoke check to ensure AsyncLogger formats without panicking.
-    init_logger(AsyncLogger::new());
+    init_logger(AsyncLogger::new(LogLevel::Debug));
     log(LogLevel::Warn, "this is a warning");
 }

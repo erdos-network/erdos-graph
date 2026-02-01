@@ -49,6 +49,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         let result = run_scrape(start_date, end_date, sources, engine, &config).await;
@@ -91,6 +92,7 @@ mod tests {
             edge_cache: Default::default(),
             heartbeat_timeout_s: 30,
             polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
         };
 
         // Use very recent short range to minimize processing time
