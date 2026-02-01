@@ -1,0 +1,129 @@
+
+Verifying vector integrity after migration...
+All vectors verified successfully!
+{"level":"INFO","msg":"Starting benchmark scrape for 2 weeks on sources: [\"dblp\", \"arxiv\"]","ts":"2026-02-01T03:10:14.540256978+00:00"}
+{"level":"INFO","msg":"Orchestrating scraping for sources: [\"dblp\", \"arxiv\"] in mode: weekly","ts":"2026-02-01T03:10:14.540354759+00:00"}
+{"level":"INFO","msg":"Calculated date range: 2026-01-18 03:10:14.540369483 UTC to 2026-02-01 03:10:14.540369483 UTC","ts":"2026-02-01T03:10:14.540411817+00:00"}
+{"level":"INFO","msg":"Split date range into 1 chunks of 28 days","ts":"2026-02-01T03:10:14.540431930+00:00"}
+{"level":"INFO","msg":"Processing chunk 1/1: 2026-01-18 03:10:14.540369483 UTC to 2026-02-01 03:10:14.540369483 UTC","ts":"2026-02-01T03:10:14.540443753+00:00"}
+{"level":"INFO","msg":"Starting scraping for range 2026-01-18 03:10:14.540369483 UTC to 2026-02-01 03:10:14.540369483 UTC","ts":"2026-02-01T03:10:14.540458253+00:00"}
+{"level":"INFO","msg":"Spawning scraper task for dblp","ts":"2026-02-01T03:10:14.540473801+00:00"}
+{"level":"INFO","msg":"Spawning scraper task for arxiv","ts":"2026-02-01T03:10:14.540608749+00:00"}
+{"level":"INFO","msg":"dblp scraper started","ts":"2026-02-01T03:10:14.540785330+00:00"}
+{"level":"INFO","msg":"arxiv scraper started","ts":"2026-02-01T03:10:14.540878211+00:00"}
+{"level":"INFO","msg":"Skipping full author preloading for HelixDB (optimization pending).","ts":"2026-02-01T03:10:14.573013437+00:00"}
+{"level":"INFO","msg":"Skipping full edge preloading for HelixDB (optimization pending).","ts":"2026-02-01T03:10:14.573048952+00:00"}
+{"level":"INFO","msg":"dblp scraper finished","ts":"2026-02-01T03:10:16.367229570+00:00"}
+{"level":"INFO","msg":"Populated filters for year 2026: 0 records in 0ms","ts":"2026-02-01T03:10:16.372629398+00:00"}
+{"level":"INFO","msg":"Ingested 101 records (Current: 54.45 rec/s, Overall: 54.45 rec/s)","ts":"2026-02-01T03:10:16.428109167+00:00"}
+{"level":"INFO","msg":"Ingested 201 records (Current: 1889.19 rec/s, Overall: 105.35 rec/s)","ts":"2026-02-01T03:10:16.481041785+00:00"}
+{"level":"INFO","msg":"Ingested 301 records (Current: 1610.33 rec/s, Overall: 152.79 rec/s)","ts":"2026-02-01T03:10:16.543141840+00:00"}
+{"level":"INFO","msg":"Ingested 401 records (Current: 1635.54 rec/s, Overall: 197.42 rec/s)","ts":"2026-02-01T03:10:16.604283899+00:00"}
+{"level":"INFO","msg":"Ingested 501 records (Current: 1630.32 rec/s, Overall: 239.42 rec/s)","ts":"2026-02-01T03:10:16.665621652+00:00"}
+{"level":"INFO","msg":"Ingested 601 records (Current: 1667.24 rec/s, Overall: 279.20 rec/s)","ts":"2026-02-01T03:10:16.725600338+00:00"}
+{"level":"INFO","msg":"Ingested 701 records (Current: 2405.99 rec/s, Overall: 319.49 rec/s)","ts":"2026-02-01T03:10:16.767161935+00:00"}
+{"level":"INFO","msg":"Ingested 801 records (Current: 1416.65 rec/s, Overall: 353.69 rec/s)","ts":"2026-02-01T03:10:16.837753628+00:00"}
+{"level":"INFO","msg":"Ingested 901 records (Current: 1175.90 rec/s, Overall: 383.45 rec/s)","ts":"2026-02-01T03:10:16.922794753+00:00"}
+{"level":"INFO","msg":"Ingested 1001 records (Current: 21.95 rec/s, Overall: 144.96 rec/s)","ts":"2026-02-01T03:10:21.478461107+00:00"}
+{"level":"INFO","msg":"Ingested 1101 records (Current: 22.23 rec/s, Overall: 96.55 rec/s)","ts":"2026-02-01T03:10:25.975958010+00:00"}
+{"level":"INFO","msg":"Ingested 1201 records (Current: 2177.89 rec/s, Overall: 104.90 rec/s)","ts":"2026-02-01T03:10:26.021873584+00:00"}
+{"level":"INFO","msg":"Ingested 1301 records (Current: 1927.68 rec/s, Overall: 113.12 rec/s)","ts":"2026-02-01T03:10:26.073748779+00:00"}
+{"level":"INFO","msg":"Ingested 1401 records (Current: 1653.80 rec/s, Overall: 121.18 rec/s)","ts":"2026-02-01T03:10:26.134215500+00:00"}
+{"level":"INFO","msg":"Ingested 1501 records (Current: 818.28 rec/s, Overall: 128.47 rec/s)","ts":"2026-02-01T03:10:26.256424955+00:00"}
+{"level":"INFO","msg":"Ingested 1601 records (Current: 957.89 rec/s, Overall: 135.82 rec/s)","ts":"2026-02-01T03:10:26.360821370+00:00"}
+{"level":"INFO","msg":"Ingested 1701 records (Current: 970.73 rec/s, Overall: 143.05 rec/s)","ts":"2026-02-01T03:10:26.463835413+00:00"}
+{"level":"INFO","msg":"Ingested 1801 records (Current: 1108.39 rec/s, Overall: 150.32 rec/s)","ts":"2026-02-01T03:10:26.554056440+00:00"}
+{"level":"INFO","msg":"Ingested 1901 records (Current: 352.50 rec/s, Overall: 155.00 rec/s)","ts":"2026-02-01T03:10:26.837745852+00:00"}
+{"level":"INFO","msg":"Ingested 2001 records (Current: 1765.72 rec/s, Overall: 162.40 rec/s)","ts":"2026-02-01T03:10:26.894378443+00:00"}
+{"level":"INFO","msg":"Ingested 2101 records (Current: 2968.08 rec/s, Overall: 170.05 rec/s)","ts":"2026-02-01T03:10:26.928069660+00:00"}
+{"level":"INFO","msg":"Ingested 2201 records (Current: 2892.81 rec/s, Overall: 177.65 rec/s)","ts":"2026-02-01T03:10:26.962638876+00:00"}
+{"level":"INFO","msg":"Ingested 2301 records (Current: 2438.01 rec/s, Overall: 185.11 rec/s)","ts":"2026-02-01T03:10:27.003655552+00:00"}
+{"level":"INFO","msg":"Ingested 2401 records (Current: 1790.72 rec/s, Overall: 192.29 rec/s)","ts":"2026-02-01T03:10:27.059499522+00:00"}
+{"level":"INFO","msg":"Ingested 2501 records (Current: 949.59 rec/s, Overall: 198.62 rec/s)","ts":"2026-02-01T03:10:27.164808271+00:00"}
+{"level":"INFO","msg":"Ingested 2601 records (Current: 824.57 rec/s, Overall: 204.59 rec/s)","ts":"2026-02-01T03:10:27.286084044+00:00"}
+{"level":"INFO","msg":"Ingested 2701 records (Current: 2931.46 rec/s, Overall: 211.89 rec/s)","ts":"2026-02-01T03:10:27.320197453+00:00"}
+{"level":"INFO","msg":"Ingested 2801 records (Current: 8.54 rec/s, Overall: 114.53 rec/s)","ts":"2026-02-01T03:10:39.029366292+00:00"}
+{"level":"INFO","msg":"arxiv scraper finished","ts":"2026-02-01T03:10:39.830553488+00:00"}
+{"level":"INFO","msg":"Ingested 2901 records (Current: 5.91 rec/s, Overall: 70.12 rec/s)","ts":"2026-02-01T03:10:55.947175795+00:00"}
+{"level":"INFO","msg":"Ingested 3001 records (Current: 835.69 rec/s, Overall: 72.32 rec/s)","ts":"2026-02-01T03:10:56.066831937+00:00"}
+{"level":"INFO","msg":"Ingested 3101 records (Current: 1076.60 rec/s, Overall: 74.57 rec/s)","ts":"2026-02-01T03:10:56.159722076+00:00"}
+{"level":"INFO","msg":"Ingested 3201 records (Current: 880.82 rec/s, Overall: 76.76 rec/s)","ts":"2026-02-01T03:10:56.273246315+00:00"}
+{"level":"INFO","msg":"Ingested 3301 records (Current: 804.84 rec/s, Overall: 78.93 rec/s)","ts":"2026-02-01T03:10:56.397494059+00:00"}
+{"level":"INFO","msg":"Ingested 3401 records (Current: 688.25 rec/s, Overall: 81.03 rec/s)","ts":"2026-02-01T03:10:56.542788350+00:00"}
+{"level":"INFO","msg":"Ingested 3501 records (Current: 15.29 rec/s, Overall: 72.17 rec/s)","ts":"2026-02-01T03:11:03.081808371+00:00"}
+{"level":"INFO","msg":"Ingested 3601 records (Current: 1297.44 rec/s, Overall: 74.12 rec/s)","ts":"2026-02-01T03:11:03.158884206+00:00"}
+{"level":"INFO","msg":"Ingested 3701 records (Current: 1051.56 rec/s, Overall: 76.03 rec/s)","ts":"2026-02-01T03:11:03.253979991+00:00"}
+{"level":"INFO","msg":"Ingested 3801 records (Current: 693.08 rec/s, Overall: 77.85 rec/s)","ts":"2026-02-01T03:11:03.398263634+00:00"}
+{"level":"INFO","msg":"Ingested 3901 records (Current: 1869.31 rec/s, Overall: 79.81 rec/s)","ts":"2026-02-01T03:11:03.451759602+00:00"}
+{"level":"INFO","msg":"Ingested 4001 records (Current: 2142.21 rec/s, Overall: 81.78 rec/s)","ts":"2026-02-01T03:11:03.498440267+00:00"}
+{"level":"INFO","msg":"Ingested 4101 records (Current: 774.59 rec/s, Overall: 83.60 rec/s)","ts":"2026-02-01T03:11:03.627544097+00:00"}
+{"level":"INFO","msg":"Ingested 4201 records (Current: 1193.85 rec/s, Overall: 85.49 rec/s)","ts":"2026-02-01T03:11:03.711305342+00:00"}
+{"level":"INFO","msg":"Ingested 4301 records (Current: 116.32 rec/s, Overall: 86.02 rec/s)","ts":"2026-02-01T03:11:04.570977055+00:00"}
+{"level":"INFO","msg":"Ingested 4401 records (Current: 2114.28 rec/s, Overall: 87.94 rec/s)","ts":"2026-02-01T03:11:04.618274086+00:00"}
+{"level":"INFO","msg":"Ingested 4501 records (Current: 1961.02 rec/s, Overall: 89.85 rec/s)","ts":"2026-02-01T03:11:04.669268591+00:00"}
+{"level":"INFO","msg":"Ingested 4601 records (Current: 11.08 rec/s, Overall: 77.82 rec/s)","ts":"2026-02-01T03:11:13.693888548+00:00"}
+{"level":"INFO","msg":"Ingested 4701 records (Current: 251.78 rec/s, Overall: 78.98 rec/s)","ts":"2026-02-01T03:11:14.091061807+00:00"}
+{"level":"INFO","msg":"Ingested 4801 records (Current: 1286.87 rec/s, Overall: 80.56 rec/s)","ts":"2026-02-01T03:11:14.168769287+00:00"}
+{"level":"INFO","msg":"Ingested 4901 records (Current: 631.14 rec/s, Overall: 82.02 rec/s)","ts":"2026-02-01T03:11:14.327212975+00:00"}
+{"level":"INFO","msg":"Ingested 5001 records (Current: 1842.60 rec/s, Overall: 83.62 rec/s)","ts":"2026-02-01T03:11:14.381483196+00:00"}
+{"level":"INFO","msg":"Ingested 5101 records (Current: 1032.09 rec/s, Overall: 85.15 rec/s)","ts":"2026-02-01T03:11:14.478374640+00:00"}
+{"level":"INFO","msg":"Ingested 5201 records (Current: 1855.26 rec/s, Overall: 86.74 rec/s)","ts":"2026-02-01T03:11:14.532275748+00:00"}
+{"level":"INFO","msg":"Ingested 5301 records (Current: 499.72 rec/s, Overall: 88.12 rec/s)","ts":"2026-02-01T03:11:14.732386190+00:00"}
+{"level":"INFO","msg":"Ingested 5401 records (Current: 1152.38 rec/s, Overall: 89.65 rec/s)","ts":"2026-02-01T03:11:14.819163258+00:00"}
+{"level":"INFO","msg":"Ingested 5501 records (Current: 1820.41 rec/s, Overall: 91.23 rec/s)","ts":"2026-02-01T03:11:14.874095618+00:00"}
+{"level":"INFO","msg":"Ingested 5601 records (Current: 6.17 rec/s, Overall: 73.20 rec/s)","ts":"2026-02-01T03:11:31.091393489+00:00"}
+{"level":"INFO","msg":"Ingested 5701 records (Current: 334.19 rec/s, Overall: 74.21 rec/s)","ts":"2026-02-01T03:11:31.390625218+00:00"}
+{"level":"INFO","msg":"Ingested 5801 records (Current: 16.56 rec/s, Overall: 70.01 rec/s)","ts":"2026-02-01T03:11:37.428489051+00:00"}
+{"level":"INFO","msg":"Ingested 5901 records (Current: 739.98 rec/s, Overall: 71.10 rec/s)","ts":"2026-02-01T03:11:37.563625747+00:00"}
+{"level":"INFO","msg":"Ingested 6001 records (Current: 800.84 rec/s, Overall: 72.20 rec/s)","ts":"2026-02-01T03:11:37.688492762+00:00"}
+{"level":"INFO","msg":"Ingested 6101 records (Current: 1865.65 rec/s, Overall: 73.36 rec/s)","ts":"2026-02-01T03:11:37.742092361+00:00"}
+{"level":"INFO","msg":"Ingested 6201 records (Current: 1802.89 rec/s, Overall: 74.51 rec/s)","ts":"2026-02-01T03:11:37.797558712+00:00"}
+{"level":"INFO","msg":"Ingested 6301 records (Current: 1428.44 rec/s, Overall: 75.65 rec/s)","ts":"2026-02-01T03:11:37.867566219+00:00"}
+{"level":"INFO","msg":"Ingested 6401 records (Current: 1526.59 rec/s, Overall: 76.79 rec/s)","ts":"2026-02-01T03:11:37.933071394+00:00"}
+{"level":"INFO","msg":"Ingested 6501 records (Current: 1306.87 rec/s, Overall: 77.92 rec/s)","ts":"2026-02-01T03:11:38.009590374+00:00"}
+{"level":"INFO","msg":"Ingested 6601 records (Current: 16.33 rec/s, Overall: 73.70 rec/s)","ts":"2026-02-01T03:11:44.133497315+00:00"}
+{"level":"INFO","msg":"Ingested 6701 records (Current: 1080.83 rec/s, Overall: 74.74 rec/s)","ts":"2026-02-01T03:11:44.226015391+00:00"}
+{"level":"INFO","msg":"Ingested 6801 records (Current: 1308.31 rec/s, Overall: 75.79 rec/s)","ts":"2026-02-01T03:11:44.302455482+00:00"}
+{"level":"INFO","msg":"Ingested 6901 records (Current: 276.36 rec/s, Overall: 76.60 rec/s)","ts":"2026-02-01T03:11:44.664294683+00:00"}
+{"level":"INFO","msg":"Ingested 7001 records (Current: 999.69 rec/s, Overall: 77.62 rec/s)","ts":"2026-02-01T03:11:44.764325721+00:00"}
+{"level":"INFO","msg":"Ingested 7101 records (Current: 1130.74 rec/s, Overall: 78.66 rec/s)","ts":"2026-02-01T03:11:44.852764585+00:00"}
+{"level":"INFO","msg":"Ingested 7201 records (Current: 354.70 rec/s, Overall: 79.51 rec/s)","ts":"2026-02-01T03:11:45.134695662+00:00"}
+{"level":"INFO","msg":"Ingested 7301 records (Current: 1645.64 rec/s, Overall: 80.57 rec/s)","ts":"2026-02-01T03:11:45.195461456+00:00"}
+{"level":"INFO","msg":"Ingested 7401 records (Current: 1828.84 rec/s, Overall: 81.62 rec/s)","ts":"2026-02-01T03:11:45.250139387+00:00"}
+{"level":"INFO","msg":"Ingested 7501 records (Current: 1678.39 rec/s, Overall: 82.67 rec/s)","ts":"2026-02-01T03:11:45.309722372+00:00"}
+{"level":"INFO","msg":"Ingested 7601 records (Current: 1672.08 rec/s, Overall: 83.71 rec/s)","ts":"2026-02-01T03:11:45.369526486+00:00"}
+{"level":"INFO","msg":"Ingested 7701 records (Current: 691.25 rec/s, Overall: 84.68 rec/s)","ts":"2026-02-01T03:11:45.514190844+00:00"}
+{"level":"INFO","msg":"Ingested 7801 records (Current: 882.15 rec/s, Overall: 85.67 rec/s)","ts":"2026-02-01T03:11:45.627551396+00:00"}
+{"level":"INFO","msg":"Ingested 7901 records (Current: 1386.18 rec/s, Overall: 86.70 rec/s)","ts":"2026-02-01T03:11:45.699691360+00:00"}
+{"level":"INFO","msg":"Ingested 8001 records (Current: 1952.26 rec/s, Overall: 87.75 rec/s)","ts":"2026-02-01T03:11:45.750913734+00:00"}
+{"level":"INFO","msg":"Ingested 8101 records (Current: 22.87 rec/s, Overall: 84.78 rec/s)","ts":"2026-02-01T03:11:50.123459388+00:00"}
+{"level":"INFO","msg":"Ingested 8201 records (Current: 1037.84 rec/s, Overall: 85.74 rec/s)","ts":"2026-02-01T03:11:50.219812493+00:00"}
+{"level":"INFO","msg":"Ingested 8301 records (Current: 2376.18 rec/s, Overall: 86.75 rec/s)","ts":"2026-02-01T03:11:50.261895976+00:00"}
+{"level":"INFO","msg":"Ingested 8401 records (Current: 1618.67 rec/s, Overall: 87.74 rec/s)","ts":"2026-02-01T03:11:50.323675350+00:00"}
+{"level":"INFO","msg":"Ingested 8501 records (Current: 1376.94 rec/s, Overall: 88.72 rec/s)","ts":"2026-02-01T03:11:50.396304661+00:00"}
+{"level":"INFO","msg":"Ingested 8601 records (Current: 701.64 rec/s, Overall: 89.63 rec/s)","ts":"2026-02-01T03:11:50.538823766+00:00"}
+{"level":"INFO","msg":"Ingested 8701 records (Current: 1035.05 rec/s, Overall: 90.58 rec/s)","ts":"2026-02-01T03:11:50.635437315+00:00"}
+{"level":"INFO","msg":"Ingested 8801 records (Current: 436.85 rec/s, Overall: 91.40 rec/s)","ts":"2026-02-01T03:11:50.864351188+00:00"}
+{"level":"INFO","msg":"Ingested 8901 records (Current: 1973.90 rec/s, Overall: 92.39 rec/s)","ts":"2026-02-01T03:11:50.915012721+00:00"}
+{"level":"INFO","msg":"Ingested 9001 records (Current: 1379.55 rec/s, Overall: 93.36 rec/s)","ts":"2026-02-01T03:11:50.987500372+00:00"}
+{"level":"INFO","msg":"Ingested 9101 records (Current: 1312.44 rec/s, Overall: 94.32 rec/s)","ts":"2026-02-01T03:11:51.063693379+00:00"}
+{"level":"INFO","msg":"Ingested 9201 records (Current: 106.76 rec/s, Overall: 94.44 rec/s)","ts":"2026-02-01T03:11:52.000384966+00:00"}
+{"level":"INFO","msg":"Ingested 9301 records (Current: 1186.68 rec/s, Overall: 95.38 rec/s)","ts":"2026-02-01T03:11:52.084654887+00:00"}
+{"level":"INFO","msg":"Ingested 9401 records (Current: 1636.82 rec/s, Overall: 96.35 rec/s)","ts":"2026-02-01T03:11:52.145747644+00:00"}
+{"level":"INFO","msg":"Ingested 9501 records (Current: 84.32 rec/s, Overall: 96.20 rec/s)","ts":"2026-02-01T03:11:53.331767892+00:00"}
+{"level":"INFO","msg":"Ingested 9601 records (Current: 568.19 rec/s, Overall: 97.04 rec/s)","ts":"2026-02-01T03:11:53.507767204+00:00"}
+{"level":"INFO","msg":"Ingested 9701 records (Current: 551.59 rec/s, Overall: 97.88 rec/s)","ts":"2026-02-01T03:11:53.689059669+00:00"}
+{"level":"INFO","msg":"Ingested 9801 records (Current: 889.45 rec/s, Overall: 98.77 rec/s)","ts":"2026-02-01T03:11:53.801486403+00:00"}
+{"level":"INFO","msg":"Ingested 9901 records (Current: 1392.29 rec/s, Overall: 99.71 rec/s)","ts":"2026-02-01T03:11:53.873310433+00:00"}
+{"level":"INFO","msg":"Ingested 10001 records (Current: 1414.58 rec/s, Overall: 100.64 rec/s)","ts":"2026-02-01T03:11:53.944002772+00:00"}
+{"level":"INFO","msg":"Ingested 10101 records (Current: 467.61 rec/s, Overall: 101.43 rec/s)","ts":"2026-02-01T03:11:54.157857388+00:00"}
+{"level":"INFO","msg":"Ingested 10201 records (Current: 4.36 rec/s, Overall: 83.27 rec/s)","ts":"2026-02-01T03:12:17.072914224+00:00"}
+{"level":"INFO","msg":"Ingested 10301 records (Current: 835.08 rec/s, Overall: 84.01 rec/s)","ts":"2026-02-01T03:12:17.192657878+00:00"}
+{"level":"INFO","msg":"Ingested 10401 records (Current: 1938.84 rec/s, Overall: 84.79 rec/s)","ts":"2026-02-01T03:12:17.244234098+00:00"}
+{"level":"INFO","msg":"Ingested 10501 records (Current: 1619.96 rec/s, Overall: 85.56 rec/s)","ts":"2026-02-01T03:12:17.305966134+00:00"}
+{"level":"INFO","msg":"Ingested 10601 records (Current: 1540.88 rec/s, Overall: 86.33 rec/s)","ts":"2026-02-01T03:12:17.370862396+00:00"}
+{"level":"INFO","msg":"Ingested 10701 records (Current: 1933.38 rec/s, Overall: 87.11 rec/s)","ts":"2026-02-01T03:12:17.422586231+00:00"}
+{"level":"INFO","msg":"Scraping orchestration finished for current chunk","ts":"2026-02-01T03:12:17.446099770+00:00"}
+{"level":"INFO","msg":"Updated checkpoint for dblp to 2026-02-01T03:10:14.540369483+00:00","ts":"2026-02-01T03:12:17.973583661+00:00"}
+{"level":"INFO","msg":"Updated checkpoint for arxiv to 2026-02-01T03:10:14.540369483+00:00","ts":"2026-02-01T03:12:17.973633515+00:00"}
+{"level":"INFO","msg":"Benchmark completed successfully. Elapsed time: 123.50 seconds","ts":"2026-02-01T03:12:18.039651897+00:00"}

@@ -44,22 +44,68 @@ impl IngestionContext {
     /// Preloads all edges into the bloom filter
     pub(crate) fn preload_edge_bloom(
         &mut self,
-        _engine: &Arc<HelixGraphEngine>,
+        engine: &Arc<HelixGraphEngine>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if self.edge_cache.edges_loaded {
             return Ok(());
         }
-        logger::info("Skipping full edge preloading for HelixDB (optimization pending).");
+        let start = Instant::now();
+        let mut count = 0;
+        let txn = engine.storage.graph_env.read_txn()?;
+        let arena = Bump::new();
+
+        if let Ok(iter) = engine.storage.edges_db.iter(&txn) {
+            for (edge_id, edge_bytes) in iter.flatten() {
+                if let Ok(edge) = Edge::from_bincode_bytes(edge_id, &edge_bytes, &arena) {
+                    if edge.label == crate::db::schema::COAUTHORED_WITH_TYPE {
+                        let u = edge.from_node;
+                        let v = edge.to_node;
+                        self.edge_cache.cold_bloom.set(&(u, v));
+                        self.edge_cache.cold_bloom.set(&(v, u));
+                        count += 1;
+                    }
+                }
+            }
+        }
+
         self.edge_cache.edges_loaded = true;
+        logger::info(&format!(
+            "Preloaded {} edges into Bloom filter in {}ms",
+            count,
+            start.elapsed().as_millis()
+        ));
         Ok(())
     }
 
     /// Preloads all author vertices into the cache
     pub(crate) fn preload_authors(
         &mut self,
-        _engine: &Arc<HelixGraphEngine>,
+        engine: &Arc<HelixGraphEngine>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        logger::info("Skipping full author preloading for HelixDB (optimization pending).");
+        let start = Instant::now();
+        let mut count = 0;
+        let txn = engine.storage.graph_env.read_txn()?;
+
+        if let Some((name_index_db, _)) = engine.storage.secondary_indices.get("name") {
+            if let Ok(iter) = name_index_db.iter(&txn) {
+                for (key_bytes, node_id) in iter.flatten() {
+                    if let Ok(HelixValue::String(name)) = bincode::deserialize(&key_bytes) {
+                        let uuid = Uuid::from_u128(node_id);
+                        let norm_name = normalize_author(&name);
+                        let v = GraphVertex::with_id(uuid, crate::db::schema::PERSON_TYPE)
+                            .property("name", name);
+                        self.author_cache.insert(norm_name, v);
+                        count += 1;
+                    }
+                }
+            }
+        }
+
+        logger::info(&format!(
+            "Preloaded {} authors in {}ms",
+            count,
+            start.elapsed().as_millis()
+        ));
         Ok(())
     }
 
