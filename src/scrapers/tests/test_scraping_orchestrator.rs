@@ -2,7 +2,7 @@
 mod tests {
     use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
     use crate::db::ingestion::PublicationRecord;
-    use crate::scrapers::cache::{DeduplicationCache, EdgeCacheSystem};
+    use crate::scrapers::cache::DeduplicationCache;
     use crate::scrapers::ingestion_utils::{
         IngestionContext, add_publication, create_authored_edge, create_coauthor_edge,
         flush_buffer, get_or_create_author_vertex, ingest_batch, publication_exists,
@@ -368,9 +368,9 @@ mod tests {
             source: "arxiv".to_string(),
         };
 
-        let mut write_buffer = Vec::new();
-        let _vertex = add_publication(&record, &mut write_buffer).unwrap();
-        flush_buffer(&mut write_buffer, &engine).unwrap();
+        let mut context = IngestionContext::new(&Config::default());
+        let _vertex = add_publication(&record, &mut context.write_buffer).unwrap();
+        flush_buffer(&mut context, &engine).unwrap();
 
         // Verify vertex existence via secondary index
         let txn = engine.storage.graph_env.read_txn().unwrap();
@@ -395,28 +395,37 @@ mod tests {
         let engine = create_test_engine().await;
 
         let author_name = "Paul Erdős";
-        let mut author_cache = HashMap::new();
-        let mut write_buffer = Vec::new();
+        let mut context = IngestionContext::new(&Config::default());
 
-        let vertex1 =
-            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
-        flush_buffer(&mut write_buffer, &engine).unwrap();
+        let vertex1 = get_or_create_author_vertex(
+            author_name,
+            &mut context.write_buffer,
+            &mut context.author_cache,
+        )
+        .unwrap();
+        flush_buffer(&mut context, &engine).unwrap();
 
         assert_eq!(vertex1.t, "Person");
 
         // Get existing
-        let mut write_buffer = Vec::new();
-        let vertex2 =
-            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+        let vertex2 = get_or_create_author_vertex(
+            author_name,
+            &mut context.write_buffer,
+            &mut context.author_cache,
+        )
+        .unwrap();
 
-        assert_eq!(write_buffer.len(), 0, "Should use cache");
+        assert_eq!(context.write_buffer.len(), 0, "Should use cache");
         assert_eq!(vertex1.id, vertex2.id);
 
         let other_name = "Alice Smith";
-        let mut write_buffer = Vec::new();
-        let vertex3 =
-            get_or_create_author_vertex(other_name, &mut write_buffer, &mut author_cache).unwrap();
-        flush_buffer(&mut write_buffer, &engine).unwrap();
+        let vertex3 = get_or_create_author_vertex(
+            other_name,
+            &mut context.write_buffer,
+            &mut context.author_cache,
+        )
+        .unwrap();
+        flush_buffer(&mut context, &engine).unwrap();
 
         assert_ne!(vertex1.id, vertex3.id);
     }
@@ -426,10 +435,13 @@ mod tests {
         let engine = create_test_engine().await;
 
         let author_name = "Paul Erdős";
-        let mut author_cache = HashMap::new();
-        let mut write_buffer = Vec::new();
-        let author =
-            get_or_create_author_vertex(author_name, &mut write_buffer, &mut author_cache).unwrap();
+        let mut context = IngestionContext::new(&Config::default());
+        let author = get_or_create_author_vertex(
+            author_name,
+            &mut context.write_buffer,
+            &mut context.author_cache,
+        )
+        .unwrap();
 
         let record = PublicationRecord {
             id: "arxiv:1234.5678".to_string(),
@@ -439,10 +451,10 @@ mod tests {
             venue: None,
             source: "arxiv".to_string(),
         };
-        let publication = add_publication(&record, &mut write_buffer).unwrap();
+        let publication = add_publication(&record, &mut context.write_buffer).unwrap();
 
-        create_authored_edge(&author, &publication, &mut write_buffer).unwrap();
-        flush_buffer(&mut write_buffer, &engine).unwrap();
+        create_authored_edge(&author, &publication, &mut context.write_buffer).unwrap();
+        flush_buffer(&mut context, &engine).unwrap();
 
         // Verify edge
         let txn = engine.storage.graph_env.read_txn().unwrap();
@@ -465,23 +477,33 @@ mod tests {
     async fn test_create_coauthor_edge_bloom_hit() {
         let engine = create_test_engine().await;
 
-        let mut author_cache = HashMap::new();
-        let mut write_buffer = Vec::new();
+        let mut context = IngestionContext::new(&Config::default());
 
-        let author1 =
-            get_or_create_author_vertex("Alice", &mut write_buffer, &mut author_cache).unwrap();
-        let author2 =
-            get_or_create_author_vertex("Bob", &mut write_buffer, &mut author_cache).unwrap();
-        flush_buffer(&mut write_buffer, &engine).unwrap();
-
-        use crate::config::EdgeCacheConfig;
-        let mut edge_cache = EdgeCacheSystem::new(EdgeCacheConfig::default());
+        let author1 = get_or_create_author_vertex(
+            "Alice",
+            &mut context.write_buffer,
+            &mut context.author_cache,
+        )
+        .unwrap();
+        let author2 = get_or_create_author_vertex(
+            "Bob",
+            &mut context.write_buffer,
+            &mut context.author_cache,
+        )
+        .unwrap();
+        flush_buffer(&mut context, &engine).unwrap();
 
         let key = (author1.id.as_u128(), author2.id.as_u128());
-        edge_cache.cold_bloom.set(&key);
+        context.edge_cache.cold_bloom.set(&key);
 
-        create_coauthor_edge(&author1, &author2, &mut write_buffer, &mut edge_cache).unwrap();
-        flush_buffer(&mut write_buffer, &engine).unwrap();
+        create_coauthor_edge(
+            &author1,
+            &author2,
+            &mut context.pending_edge_updates,
+            &mut context.edge_cache,
+        )
+        .unwrap();
+        flush_buffer(&mut context, &engine).unwrap();
 
         // Check manually via DB
         let txn = engine.storage.graph_env.read_txn().unwrap();
@@ -535,9 +557,6 @@ mod tests {
             log_level: crate::logger::LogLevel::Info,
         };
 
-        let mut dedup_cache = DeduplicationCache::new(100);
-        let mut author_cache = HashMap::new();
-
         let record1 = PublicationRecord {
             id: "arxiv:1234".to_string(),
             title: "Original Title".to_string(),
@@ -547,18 +566,22 @@ mod tests {
             source: "arxiv".to_string(),
         };
 
-        let mut write_buffer = Vec::new();
-        let author_v =
-            get_or_create_author_vertex("Author A", &mut write_buffer, &mut author_cache).unwrap();
-        let pub1 = add_publication(&record1, &mut write_buffer).unwrap();
-        create_authored_edge(&author_v, &pub1, &mut write_buffer).unwrap();
-        flush_buffer(&mut write_buffer, &engine).unwrap();
+        let mut context = IngestionContext::new(&config);
+        let author_v = get_or_create_author_vertex(
+            "Author A",
+            &mut context.write_buffer,
+            &mut context.author_cache,
+        )
+        .unwrap();
+        let pub1 = add_publication(&record1, &mut context.write_buffer).unwrap();
+        create_authored_edge(&author_v, &pub1, &mut context.write_buffer).unwrap();
+        flush_buffer(&mut context, &engine).unwrap();
 
         assert!(publication_exists(
             &record1,
             &engine,
             &config,
-            &mut dedup_cache
+            &mut context.dedup_cache
         ));
 
         let record2 = PublicationRecord {
@@ -574,7 +597,7 @@ mod tests {
             &record2,
             &engine,
             &config,
-            &mut dedup_cache
+            &mut context.dedup_cache
         ));
 
         let record3 = PublicationRecord {
@@ -589,7 +612,7 @@ mod tests {
             &record3,
             &engine,
             &config,
-            &mut dedup_cache
+            &mut context.dedup_cache
         ));
     }
 

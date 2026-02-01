@@ -29,6 +29,7 @@ pub(crate) struct IngestionContext {
     pub author_cache: HashMap<String, GraphVertex>,
     pub edge_cache: EdgeCacheSystem,
     pub write_buffer: Vec<WriteOperation>,
+    pub pending_edge_updates: HashMap<(u128, u128), u64>,
 }
 
 impl IngestionContext {
@@ -37,29 +38,76 @@ impl IngestionContext {
             dedup_cache: DeduplicationCache::new(config.deduplication.bloom_filter_size),
             author_cache: HashMap::new(),
             edge_cache: EdgeCacheSystem::new(config.edge_cache.clone()),
-            write_buffer: Vec::with_capacity(1000),
+            write_buffer: Vec::with_capacity(5000),
+            pending_edge_updates: HashMap::new(),
         }
     }
 
     /// Preloads all edges into the bloom filter
     pub(crate) fn preload_edge_bloom(
         &mut self,
-        _engine: &Arc<HelixGraphEngine>,
+        engine: &Arc<HelixGraphEngine>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if self.edge_cache.edges_loaded {
             return Ok(());
         }
-        logger::info("Skipping full edge preloading for HelixDB (optimization pending).");
+        let start = Instant::now();
+        let mut count = 0;
+        let txn = engine.storage.graph_env.read_txn()?;
+        let arena = Bump::new();
+
+        if let Ok(iter) = engine.storage.edges_db.iter(&txn) {
+            for (edge_id, edge_bytes) in iter.flatten() {
+                if let Ok(edge) = Edge::from_bincode_bytes(edge_id, edge_bytes, &arena)
+                    && edge.label == crate::db::schema::COAUTHORED_WITH_TYPE
+                {
+                    let u = edge.from_node;
+                    let v = edge.to_node;
+                    self.edge_cache.cold_bloom.set(&(u, v));
+                    self.edge_cache.cold_bloom.set(&(v, u));
+                    count += 1;
+                }
+            }
+        }
+
         self.edge_cache.edges_loaded = true;
+        logger::info(&format!(
+            "Preloaded {} edges into Bloom filter in {}ms",
+            count,
+            start.elapsed().as_millis()
+        ));
         Ok(())
     }
 
     /// Preloads all author vertices into the cache
     pub(crate) fn preload_authors(
         &mut self,
-        _engine: &Arc<HelixGraphEngine>,
+        engine: &Arc<HelixGraphEngine>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        logger::info("Skipping full author preloading for HelixDB (optimization pending).");
+        let start = Instant::now();
+        let mut count = 0;
+        let txn = engine.storage.graph_env.read_txn()?;
+
+        if let Some((name_index_db, _)) = engine.storage.secondary_indices.get("name")
+            && let Ok(iter) = name_index_db.iter(&txn)
+        {
+            for (key_bytes, node_id) in iter.flatten() {
+                if let Ok(HelixValue::String(name)) = bincode::deserialize(key_bytes) {
+                    let uuid = Uuid::from_u128(node_id);
+                    let norm_name = normalize_author(&name);
+                    let v = GraphVertex::with_id(uuid, crate::db::schema::PERSON_TYPE)
+                        .property("name", name);
+                    self.author_cache.insert(norm_name, v);
+                    count += 1;
+                }
+            }
+        }
+
+        logger::info(&format!(
+            "Preloaded {} authors in {}ms",
+            count,
+            start.elapsed().as_millis()
+        ));
         Ok(())
     }
 
@@ -82,7 +130,7 @@ impl IngestionContext {
         // Optimization: Group by source to avoid creating an iterator for every pair
         let mut adjacency_requests: HashMap<u128, HashSet<u128>> = HashMap::new();
         for &(u, v) in edge_keys {
-            if self.edge_cache.get((u, v)).is_none() {
+            if self.edge_cache.get((u, v)).is_none() && self.edge_cache.exists((u, v)) {
                 adjacency_requests.entry(u).or_default().insert(v);
             }
         }
@@ -212,29 +260,70 @@ fn to_helix_edge<'arena>(e: &GraphEdge, id: u128, arena: &'arena Bump) -> Edge<'
     }
 }
 
-/// Flushes the write buffer to the database using bulk operations.
+/// Flushes the write buffer and pending edge updates to the database.
 pub(crate) fn flush_buffer(
-    buffer: &mut Vec<WriteOperation>,
+    context: &mut IngestionContext,
     engine: &Arc<HelixGraphEngine>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if buffer.is_empty() {
+    if context.write_buffer.is_empty() && context.pending_edge_updates.is_empty() {
         return Ok(());
     }
 
     let start = Instant::now();
-    let count = buffer.len();
+    let mut count = context.write_buffer.len();
     let mut wtxn = engine.storage.graph_env.write_txn()?;
     let arena = Bump::new();
 
-    for op in buffer.drain(..) {
+    // 1. Convert pending edge updates to WriteOperations
+    // We need to fetch current weights from DB if they weren't in cache
+    for ((u_id, v_id), increment) in context.pending_edge_updates.drain() {
+        let key = (u_id, v_id);
+
+        // Determine final weight
+        let final_weight = if let Some(cached) = context.edge_cache.get(key) {
+            // If it was in cache, the cache already has the incremented value
+            // because we updated it in create_coauthor_edge
+            cached
+        } else {
+            // Not in hot cache, check DB
+            // Note: In a real implementation we might want to batch this read too,
+            // but for now we trust the "prefetch_coauthor_edges" did its job
+            // or we take the hit for cold edges.
+            // Since we updated cache.put(key, 1) or similar in create_coauthor_edge
+            // for new edges, this branch is mostly for "exists in bloom but not LRU" cases.
+            match fetch_weight_from_db(u_id, v_id, engine, &wtxn)? {
+                Some(w) => w + increment,
+                None => increment,
+            }
+        };
+
+        // Update cache with final confirmed weight
+        context.edge_cache.put(key, final_weight);
+
+        // Create the edge operations
+        let u_uuid = Uuid::from_u128(u_id);
+        let v_uuid = Uuid::from_u128(v_id);
+
+        use crate::db::schema::COAUTHORED_WITH_TYPE;
+        let edge1 =
+            GraphEdge::new(u_uuid, v_uuid, COAUTHORED_WITH_TYPE).property("weight", final_weight);
+        context.write_buffer.push(WriteOperation::CreateEdge(edge1));
+
+        let edge2 =
+            GraphEdge::new(v_uuid, u_uuid, COAUTHORED_WITH_TYPE).property("weight", final_weight);
+        context.write_buffer.push(WriteOperation::CreateEdge(edge2));
+
+        count += 2;
+    }
+
+    for op in context.write_buffer.drain(..) {
         match op {
             WriteOperation::CreateVertex(v) => {
                 let node = to_helix_node(&v, &arena);
                 if let Ok(bytes) = bincode::serialize(&node) {
-                    // Use APPEND flag for sorted inserts (LMDB optimization)
                     engine.storage.nodes_db.put_with_flags(
                         &mut wtxn,
-                        PutFlags::APPEND,
+                        PutFlags::empty(),
                         &node.id,
                         &bytes,
                     )?;
@@ -244,7 +333,6 @@ pub(crate) fn flush_buffer(
                             let val_str = value_to_string(val);
                             if let Ok(key_bytes) = bincode::serialize(&HelixValue::String(val_str))
                             {
-                                // For secondary indices (DUP_SORT), empty flags adds to the set
                                 db.put_with_flags(
                                     &mut wtxn,
                                     PutFlags::empty(),
@@ -261,7 +349,6 @@ pub(crate) fn flush_buffer(
                 let edge = to_helix_edge(&e, edge_id, &arena);
 
                 if let Ok(bytes) = bincode::serialize(&edge) {
-                    // Use APPEND flag for sorted inserts (LMDB optimization)
                     engine.storage.edges_db.put_with_flags(
                         &mut wtxn,
                         PutFlags::APPEND,
@@ -271,17 +358,14 @@ pub(crate) fn flush_buffer(
 
                     let label_hash = helix_db::utils::label_hash::hash_label(edge.label, None);
 
-                    // Use APPEND_DUP because edge_id (part of value) is monotonic
-                    engine.storage.out_edges_db.put_with_flags(
+                    engine.storage.out_edges_db.put(
                         &mut wtxn,
-                        PutFlags::APPEND_DUP,
                         &HelixGraphStorage::out_edge_key(&edge.from_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.to_node),
                     )?;
 
-                    engine.storage.in_edges_db.put_with_flags(
+                    engine.storage.in_edges_db.put(
                         &mut wtxn,
-                        PutFlags::APPEND_DUP,
                         &HelixGraphStorage::in_edge_key(&edge.to_node, &label_hash),
                         &HelixGraphStorage::pack_edge_data(&edge.id, &edge.from_node),
                     )?;
@@ -299,6 +383,47 @@ pub(crate) fn flush_buffer(
     ));
 
     Ok(())
+}
+
+fn fetch_weight_from_db(
+    u: u128,
+    v: u128,
+    engine: &Arc<HelixGraphEngine>,
+    txn: &heed3::RwTxn,
+) -> Result<Option<u64>, Box<dyn std::error::Error>> {
+    use crate::db::schema::COAUTHORED_WITH_TYPE;
+    let label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, None);
+    let out_key = HelixGraphStorage::out_edge_key(&u, &label_hash);
+    let arena = Bump::new();
+
+    if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(txn, &out_key) {
+        for (_, val_bytes) in iter.flatten() {
+            if val_bytes.len() >= 32 {
+                let mut to_node_bytes = [0u8; 16];
+                to_node_bytes.copy_from_slice(&val_bytes[16..32]);
+                let to_node_id = u128::from_be_bytes(to_node_bytes);
+
+                if to_node_id == v {
+                    let mut edge_id_bytes = [0u8; 16];
+                    edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
+                    let edge_id = u128::from_be_bytes(edge_id_bytes);
+
+                    if let Ok(Some(edge_bytes)) = engine.storage.edges_db.get(txn, &edge_id)
+                        && let Ok(edge) = Edge::from_bincode_bytes(edge_id, edge_bytes, &arena)
+                        && let Some(props) = edge.properties
+                        && let Some(w_val) = props.get("weight")
+                    {
+                        return Ok(match w_val {
+                            HelixValue::U64(w) => Some(*w),
+                            HelixValue::I64(w) => Some(*w as u64),
+                            _ => Some(1),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Ingests a batch of publication records into the database.
@@ -398,14 +523,14 @@ pub(crate) async fn ingest_batch(
                 create_coauthor_edge(
                     author1,
                     author2,
-                    &mut context.write_buffer,
+                    &mut context.pending_edge_updates,
                     &mut context.edge_cache,
                 )?;
             }
         }
     }
 
-    flush_buffer(&mut context.write_buffer, &engine)?;
+    flush_buffer(context, &engine)?;
 
     Ok(())
 }
@@ -464,16 +589,13 @@ pub(crate) fn create_authored_edge(
     Ok(())
 }
 
-/// Create co-author edge with weight
+/// Create co-author edge with weight (buffered)
 pub(crate) fn create_coauthor_edge(
     author1: &GraphVertex,
     author2: &GraphVertex,
-    write_buffer: &mut Vec<WriteOperation>,
+    pending_updates: &mut HashMap<(u128, u128), u64>,
     edge_cache: &mut EdgeCacheSystem,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::db::schema::COAUTHORED_WITH_TYPE;
-
-    let edge_type = COAUTHORED_WITH_TYPE;
     let (u, v) = if author1.id < author2.id {
         (author1, author2)
     } else {
@@ -482,30 +604,23 @@ pub(crate) fn create_coauthor_edge(
 
     let key = (u.id.as_u128(), v.id.as_u128());
 
-    let mut add_ops = |weight: u64| -> Result<(), Box<dyn std::error::Error>> {
-        let edge1 = GraphEdge::new(u.id, v.id, edge_type).property("weight", weight);
-        write_buffer.push(WriteOperation::CreateEdge(edge1));
+    // Update local batch counter
+    *pending_updates.entry(key).or_insert(0) += 1;
 
-        let edge2 = GraphEdge::new(v.id, u.id, edge_type).property("weight", weight);
-        write_buffer.push(WriteOperation::CreateEdge(edge2));
-        Ok(())
-    };
-
-    if let Some(current_weight) = edge_cache.get(key) {
-        let new_weight = current_weight + 1;
-        edge_cache.put(key, new_weight);
-        add_ops(new_weight)?;
-        return Ok(());
+    // We also speculatively update the cache so subsequent lookups in this batch
+    // (if we were still reading from it) would be correct-ish, though strict consistency
+    // is handled by the flush.
+    let cached_weight = edge_cache.get(key);
+    if let Some(current_weight) = cached_weight {
+        edge_cache.put(key, current_weight + 1);
+    } else if edge_cache.exists(key) {
+        // If it exists in bloom but not LRU, we don't know the exact weight yet.
+        // We will resolve this during flush.
+        // For now, just mark it as "seen" in cache if you want, or do nothing.
+    } else {
+        // New edge entirely
+        edge_cache.put(key, 1);
     }
-
-    if edge_cache.exists(key) {
-        edge_cache.put(key, 2);
-        add_ops(2)?;
-        return Ok(());
-    }
-
-    edge_cache.put(key, 1);
-    add_ops(1)?;
 
     Ok(())
 }
