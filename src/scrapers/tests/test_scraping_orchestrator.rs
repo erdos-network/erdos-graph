@@ -493,8 +493,7 @@ mod tests {
                 initial_start_date: "2020-01-01T00:00:00Z".to_string(),
                 weekly_days: 7,
                 checkpoint_dir: None,
-                write_buffer_capacity: 5000,
-                estimated_edges_per_paper: 50,
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
@@ -581,8 +580,7 @@ mod tests {
                 initial_start_date: "2020-01-01T00:00:00Z".to_string(),
                 weekly_days: 7,
                 checkpoint_dir: None,
-                write_buffer_capacity: 5000,
-                estimated_edges_per_paper: 50,
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,

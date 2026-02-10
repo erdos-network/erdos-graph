@@ -23,6 +23,14 @@ pub(crate) enum WriteOperation {
     CreateEdge(GraphEdge),
 }
 
+/// Statistics for analyzing mega-paper edge processing.
+#[derive(Default)]
+struct MegaPaperStats {
+    total_pairs: usize,
+    bloom_hits: usize,
+    cache_hits: usize,
+}
+
 /// Context for ingestion to maintain caches
 pub(crate) struct IngestionContext {
     pub dedup_cache: DeduplicationCache,
@@ -302,6 +310,7 @@ fn bulk_prefetch_author_edges(
     author_ids: &HashSet<u128>,
     engine: &Arc<HelixGraphEngine>,
     edge_cache: &mut EdgeCacheSystem,
+    max_edges_per_author: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if author_ids.is_empty() {
         return Ok(());
@@ -315,9 +324,14 @@ fn bulk_prefetch_author_edges(
 
     for &author_id in author_ids {
         let out_key = HelixGraphStorage::out_edge_key(&author_id, &label_hash);
+        let mut edges_fetched = 0;
 
         if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
             for (_, val_bytes) in iter.flatten() {
+                if edges_fetched >= max_edges_per_author {
+                    break;
+                }
+
                 if val_bytes.len() >= 32 {
                     let mut to_node_bytes = [0u8; 16];
                     to_node_bytes.copy_from_slice(&val_bytes[16..32]);
@@ -345,6 +359,7 @@ fn bulk_prefetch_author_edges(
                             (to_node_id, author_id)
                         };
                         edge_cache.put(key, weight);
+                        edges_fetched += 1;
                     }
                 }
             }
@@ -425,19 +440,31 @@ pub(crate) async fn ingest_batch(
 
     use bloomfilter::Bloom;
 
-    // Collect all unique authors in this batch
+    // Collect all unique authors and identify mega-papers
     let mut batch_author_ids: HashSet<u128> = HashSet::new();
+    let mut has_mega_paper = false;
+    let mega_threshold = config.ingestion.mega_paper_threshold;
+
     for authors in &record_author_vertices {
+        if authors.len() > mega_threshold {
+            has_mega_paper = true;
+        }
         for author in authors {
             batch_author_ids.insert(author.id.as_u128());
         }
     }
 
-    // Bulk prefetch ALL edges for these authors to warm the cache
-    if let Err(e) = bulk_prefetch_author_edges(&batch_author_ids, &engine, &mut context.edge_cache)
-    {
+    // Always prefetch to warm cache for subsequent normal papers
+    let prefetch_start = Instant::now();
+    if let Err(e) = bulk_prefetch_author_edges(
+        &batch_author_ids,
+        &engine,
+        &mut context.edge_cache,
+        config.ingestion.max_edges_per_author,
+    ) {
         logger::error(&format!("Failed to bulk prefetch author edges: {}", e));
     }
+    let prefetch_time = prefetch_start.elapsed().as_millis();
 
     // Generate edge pairs with cache warmed
     let estimated_edges = new_records.len() * config.ingestion.estimated_edges_per_paper;
@@ -446,12 +473,31 @@ pub(crate) async fn ingest_batch(
 
     let mut batch_edge_weights: HashMap<(u128, u128), u64> = HashMap::new();
 
+    // Track statistics for mega-papers
+    let mut mega_paper_stats = MegaPaperStats::default();
+
+    let edge_gen_start = Instant::now();
     for authors in &record_author_vertices {
+        let is_mega = authors.len() > mega_threshold;
+
         for i in 0..authors.len() {
             for j in (i + 1)..authors.len() {
                 let id1 = authors[i].id.as_u128();
                 let id2 = authors[j].id.as_u128();
                 let key = if id1 < id2 { (id1, id2) } else { (id2, id1) };
+
+                if is_mega {
+                    mega_paper_stats.total_pairs += 1;
+
+                    // Check bloom first (cheap)
+                    if context.edge_cache.cold_bloom.check(&key) {
+                        mega_paper_stats.bloom_hits += 1;
+                        // Check cache second (more expensive)
+                        if context.edge_cache.get(key).is_some() {
+                            mega_paper_stats.cache_hits += 1;
+                        }
+                    }
+                }
 
                 if batch_edge_bloom.check(&key) {
                     *batch_edge_weights.entry(key).or_insert(0) += 1;
@@ -461,6 +507,31 @@ pub(crate) async fn ingest_batch(
                 }
             }
         }
+    }
+    let edge_gen_time = edge_gen_start.elapsed().as_millis();
+
+    if has_mega_paper {
+        let bloom_hit_pct = if mega_paper_stats.total_pairs > 0 {
+            (mega_paper_stats.bloom_hits as f64 / mega_paper_stats.total_pairs as f64) * 100.0
+        } else {
+            0.0
+        };
+        let cache_hit_pct = if mega_paper_stats.total_pairs > 0 {
+            (mega_paper_stats.cache_hits as f64 / mega_paper_stats.total_pairs as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        logger::info(&format!(
+            "Mega-paper metrics: {} pairs, bloom hits: {} ({:.1}%), cache hits: {} ({:.1}%), prefetch: {}ms, generation: {}ms",
+            mega_paper_stats.total_pairs,
+            mega_paper_stats.bloom_hits,
+            bloom_hit_pct,
+            mega_paper_stats.cache_hits,
+            cache_hit_pct,
+            prefetch_time,
+            edge_gen_time
+        ));
     }
 
     // Calculate final weights and prepare for flush

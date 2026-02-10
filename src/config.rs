@@ -86,6 +86,12 @@ fn default_edge_warm_size() -> usize {
 fn default_edge_bloom_size() -> usize {
     100_000_000
 }
+fn default_mega_paper_threshold() -> usize {
+    50
+}
+fn default_max_edges_per_author() -> usize {
+    5_000
+}
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct IngestionConfig {
@@ -103,6 +109,12 @@ pub struct IngestionConfig {
     /// Estimated edges per paper for bloom filter sizing
     #[serde(default = "default_estimated_edges_per_paper")]
     pub estimated_edges_per_paper: usize,
+    /// Threshold for considering a paper a "mega-paper" (number of authors)
+    #[serde(default = "default_mega_paper_threshold")]
+    pub mega_paper_threshold: usize,
+    /// Maximum edges to prefetch per author to bound query cost
+    #[serde(default = "default_max_edges_per_author")]
+    pub max_edges_per_author: usize,
 }
 
 impl Default for IngestionConfig {
@@ -114,6 +126,8 @@ impl Default for IngestionConfig {
             checkpoint_dir: None,
             write_buffer_capacity: default_write_buffer_capacity(),
             estimated_edges_per_paper: default_estimated_edges_per_paper(),
+            mega_paper_threshold: default_mega_paper_threshold(),
+            max_edges_per_author: default_max_edges_per_author(),
         }
     }
 }
