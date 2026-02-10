@@ -431,9 +431,4 @@ impl EdgeCacheSystem {
         // Mark in bloom filter
         self.cold_bloom.set(&key);
     }
-
-    /// Check bloom existence
-    pub fn exists(&self, key: (u128, u128)) -> bool {
-        self.cold_bloom.check(&key)
-    }
 }

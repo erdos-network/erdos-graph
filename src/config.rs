@@ -97,6 +97,12 @@ pub struct IngestionConfig {
     pub weekly_days: u64,
     /// Directory to store checkpoint files (defaults to "checkpoints")
     pub checkpoint_dir: Option<String>,
+    /// Write buffer initial capacity
+    #[serde(default = "default_write_buffer_capacity")]
+    pub write_buffer_capacity: usize,
+    /// Estimated edges per paper for bloom filter sizing
+    #[serde(default = "default_estimated_edges_per_paper")]
+    pub estimated_edges_per_paper: usize,
 }
 
 impl Default for IngestionConfig {
@@ -106,8 +112,18 @@ impl Default for IngestionConfig {
             initial_start_date: "1932-01-01T00:00:00Z".to_string(),
             weekly_days: 7,
             checkpoint_dir: None,
+            write_buffer_capacity: default_write_buffer_capacity(),
+            estimated_edges_per_paper: default_estimated_edges_per_paper(),
         }
     }
+}
+
+fn default_write_buffer_capacity() -> usize {
+    5000
+}
+
+fn default_estimated_edges_per_paper() -> usize {
+    50
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]

@@ -19,7 +19,9 @@
     "ingestion": {
         "chunk_size_days": 28,
         "initial_start_date": "1930-01-01T00:00:00Z",
-        "weekly_days": 7
+        "weekly_days": 7,
+        "write_buffer_capacity": 5000,
+        "estimated_edges_per_paper": 50
     },
     "deduplication": {
         "title_similarity_threshold": 0.9,
