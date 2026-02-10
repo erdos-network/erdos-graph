@@ -51,7 +51,7 @@ pub async fn run_scrape(
     let mut tasks = vec![];
 
     for src in &sources {
-        logger::info(&format!("Spawning scraper task for {}", src));
+        logger::debug(&format!("Spawning scraper task for {}", src));
         // Create producer task for each source
         let producer = queue.create_producer();
         let src_name = src.clone();
@@ -70,10 +70,10 @@ pub async fn run_scrape(
                 }
             };
 
-            logger::info(&format!("{} scraper started", src_name));
+            logger::debug(&format!("{} scraper started", src_name));
             match scraper.scrape_range(start, end, producer).await {
                 Ok(()) => {
-                    logger::info(&format!("{} scraper finished", src_name));
+                    logger::debug(&format!("{} scraper finished", src_name));
                 }
                 Err(e) => {
                     logger::error(&format!("Scraping failed for {}: {}", src_name, e));

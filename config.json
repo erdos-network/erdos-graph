@@ -1,7 +1,8 @@
 {
     "scrapers": {
         "enabled": [
-            "dblp"
+            "dblp",
+            "arxiv"
         ],
         "dblp": {
             "base_url": "https://dblp.org/search/publ/api",

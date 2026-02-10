@@ -560,7 +560,7 @@ pub(crate) async fn ingest_batch(
             0.0
         };
 
-        logger::info(&format!(
+        logger::debug(&format!(
             "Mega-paper metrics: {} pairs, bloom hits: {} ({:.1}%), cache hits: {} ({:.1}%), prefetch: {}ms, generation: {}ms",
             mega_paper_stats.total_pairs,
             mega_paper_stats.bloom_hits,
