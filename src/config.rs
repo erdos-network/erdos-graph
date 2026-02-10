@@ -92,6 +92,12 @@ fn default_mega_paper_threshold() -> usize {
 fn default_max_edges_per_author() -> usize {
     5_000
 }
+fn default_prefetch_skip_bloom_threshold() -> f64 {
+    0.95
+}
+fn default_bloom_sample_size() -> usize {
+    100
+}
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct IngestionConfig {
@@ -115,6 +121,12 @@ pub struct IngestionConfig {
     /// Maximum edges to prefetch per author to bound query cost
     #[serde(default = "default_max_edges_per_author")]
     pub max_edges_per_author: usize,
+    /// Bloom hit rate threshold to skip prefetch for mega-papers (0.0-1.0)
+    #[serde(default = "default_prefetch_skip_bloom_threshold")]
+    pub prefetch_skip_bloom_threshold: f64,
+    /// Number of edges to sample for estimating bloom coverage
+    #[serde(default = "default_bloom_sample_size")]
+    pub bloom_sample_size: usize,
 }
 
 impl Default for IngestionConfig {
@@ -128,6 +140,8 @@ impl Default for IngestionConfig {
             estimated_edges_per_paper: default_estimated_edges_per_paper(),
             mega_paper_threshold: default_mega_paper_threshold(),
             max_edges_per_author: default_max_edges_per_author(),
+            prefetch_skip_bloom_threshold: default_prefetch_skip_bloom_threshold(),
+            bloom_sample_size: default_bloom_sample_size(),
         }
     }
 }

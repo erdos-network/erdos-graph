@@ -324,13 +324,14 @@ fn bulk_prefetch_author_edges(
 
     for &author_id in author_ids {
         let out_key = HelixGraphStorage::out_edge_key(&author_id, &label_hash);
-        let mut edges_fetched = 0;
+        let mut edges_processed = 0;
 
         if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
             for (_, val_bytes) in iter.flatten() {
-                if edges_fetched >= max_edges_per_author {
+                if edges_processed >= max_edges_per_author {
                     break;
                 }
+                edges_processed += 1;
 
                 if val_bytes.len() >= 32 {
                     let mut to_node_bytes = [0u8; 16];
@@ -359,7 +360,6 @@ fn bulk_prefetch_author_edges(
                             (to_node_id, author_id)
                         };
                         edge_cache.put(key, weight);
-                        edges_fetched += 1;
                     }
                 }
             }
@@ -454,14 +454,52 @@ pub(crate) async fn ingest_batch(
         }
     }
 
-    // Always prefetch to warm cache for subsequent normal papers
+    // For mega-papers, sample edges to estimate bloom coverage and skip prefetch if high
     let prefetch_start = Instant::now();
-    if let Err(e) = bulk_prefetch_author_edges(
-        &batch_author_ids,
-        &engine,
-        &mut context.edge_cache,
-        config.ingestion.max_edges_per_author,
-    ) {
+    let skip_prefetch = if has_mega_paper {
+        let mut sample_hits = 0;
+        let mut sample_total = 0;
+        let sample_size = config.ingestion.bloom_sample_size;
+        let sample_authors = (sample_size as f64).sqrt().ceil() as usize;
+
+        'sampling: for authors in &record_author_vertices {
+            if authors.len() <= mega_threshold {
+                continue;
+            }
+            for i in 0..authors.len().min(sample_authors) {
+                for j in (i + 1)..authors.len().min(sample_authors) {
+                    let id1 = authors[i].id.as_u128();
+                    let id2 = authors[j].id.as_u128();
+                    let key = if id1 < id2 { (id1, id2) } else { (id2, id1) };
+
+                    if context.edge_cache.cold_bloom.check(&key) {
+                        sample_hits += 1;
+                    }
+                    sample_total += 1;
+
+                    if sample_total >= sample_size {
+                        break 'sampling;
+                    }
+                }
+            }
+        }
+
+        // Skip prefetch if bloom hit rate exceeds threshold
+        sample_total > 0
+            && (sample_hits as f64 / sample_total as f64)
+                > config.ingestion.prefetch_skip_bloom_threshold
+    } else {
+        false
+    };
+
+    if !skip_prefetch
+        && let Err(e) = bulk_prefetch_author_edges(
+            &batch_author_ids,
+            &engine,
+            &mut context.edge_cache,
+            config.ingestion.max_edges_per_author,
+        )
+    {
         logger::error(&format!("Failed to bulk prefetch author edges: {}", e));
     }
     let prefetch_time = prefetch_start.elapsed().as_millis();
