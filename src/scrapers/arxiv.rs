@@ -154,9 +154,7 @@ fn parse_entry_str(
     let mut cur_primary_cat: Option<String> = None;
     let mut cur_authors: Vec<String> = Vec::new();
 
-    // Cheap pre-scan fallback: if the entry slice contains a primary_category
-    // attribute, grab its term value early so it's available when we build the
-    // PublicationRecord (handles odd namespace placement in some feeds).
+    // Pre-scan for primary_category attribute to handle odd namespace placement
     if cur_primary_cat.is_none()
         && let Some(idx) = entry_str.find("primary_category")
         && let Some(term_pos) = entry_str[idx..].find("term=\"")
@@ -167,17 +165,13 @@ fn parse_entry_str(
         }
     }
 
-    // Main streaming XML event loop: iterate over XML events produced by
-    // `quick-xml` and populate the temporary fields for the current `<entry>`.
-    // We stop when we reach the end of the entry or encounter EOF/errors.
+    // Main XML event loop to populate entry fields
     loop {
         tmp.clear();
         match reader.read_event_into(&mut tmp) {
             Ok(Event::Start(ref e)) => {
                 let name = e.local_name();
                 match name.as_ref() {
-                    // Start of an `<entry>` element: flip the flag so subsequent
-                    // child elements are captured into the current record fields.
                     b"entry" => inside_entry = true,
                     // Capture the identifier text inside `<id>`.
                     b"id" if inside_entry => {
@@ -205,7 +199,6 @@ fn parse_entry_str(
                             cur_journal_ref = Some(normalize_text(&txt));
                         }
                     }
-                    // Author name elements: append to the authors list.
                     b"name" if inside_entry => {
                         if let Ok(txt) = reader.read_text(e.name()) {
                             cur_authors.push(normalize_text(&txt));
@@ -219,10 +212,7 @@ fn parse_entry_str(
                         }
                     }
                     _ => {
-                        // Handle namespaced primary_category variants like
-                        // `{http://arxiv.org/schemas/atom}primary_category`. The
-                        // element local-name may include a namespace, so we match
-                        // on the suffix and reuse the attribute extractor.
+                        // Handle namespaced primary_category variants
                         if inside_entry
                             && name.as_ref().ends_with(b"primary_category")
                             && let Some(val) = extract_primary_category_from_attrs(e)
@@ -374,8 +364,6 @@ pub async fn scrape_range_with_config_async(
         return Ok(());
     }
 
-    // let mut results: Vec<PublicationRecord> = Vec::new();
-
     loop {
         // Format dates as YYYYMMDDHHMM
         let start_str = start_date.format("%Y%m%d%H%M").to_string();
@@ -388,9 +376,7 @@ pub async fn scrape_range_with_config_async(
 
         logger::debug(&format!("Fetching ArXiv page: {}", url));
 
-        // Sliding-window streaming parser: accumulate chunks and extract <entry> slices
         let mut resp = client.get(&url).send().await?;
-        // Remember how many results we had before this page so we can decide
         // when to stop (arXiv returns fewer than page_size when exhausted)
         // Remember how many results we processed in this page
         let mut page_record_count = 0;
@@ -402,8 +388,6 @@ pub async fn scrape_range_with_config_async(
                 None => break,
             }
 
-            // Extract complete entries
-            // Extract complete entries
             extract_complete_entries(
                 &mut buf_acc,
                 start_date,
@@ -423,7 +407,6 @@ pub async fn scrape_range_with_config_async(
             &mut page_record_count,
         );
 
-        // Be polite to arXiv: small delay between paged requests
         sleep(Duration::from_millis(delay_ms)).await;
 
         // If fewer entries were added than page_size, we've reached the end

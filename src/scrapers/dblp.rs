@@ -250,12 +250,10 @@ pub async fn scrape_range_with_config(
     let start_year = start_date.year();
     let end_year = end_date.year();
     let client = Client::new();
-    // let mut all_records = Vec::new();
     let current_year = Utc::now().year();
 
     for year in start_year..=end_year {
-        // Optimization: For historic years, only scrape if the range includes the start of the year.
-        // This prevents re-scraping the entire year for every small time chunk (e.g. weekly).
+        // For historic years, only scrape if the range includes the start of the year
         // We consider "active" years to be the current and previous year.
         let is_active_year = year >= current_year - 1;
 
@@ -277,66 +275,103 @@ pub async fn scrape_range_with_config(
             }
         }
 
-        let mut first = 0;
-        let query = format!("year:{}", year);
+        // Split year into multiple disjoint queries to work around DBLP's 10K result limit
+        let mut query_filters = Vec::new();
+        
+        // Split inproceedings by venue prefixes
+        let conf_prefixes = vec![
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
+        ];
+        for prefix in conf_prefixes {
+            query_filters.push(format!("year:{} type:inproceedings venue:{}*", year, prefix));
+        }
+        
+        // Split articles by journal prefixes
+        let journal_prefixes = vec![
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
+        ];
+        for prefix in journal_prefixes {
+            query_filters.push(format!("year:{} type:article venue:{}*", year, prefix));
+        }
+        
+        // Books - split by first letter of title
+        for prefix in vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+                           "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"] {
+            query_filters.push(format!("year:{} type:book {}*", year, prefix));
+        }
+        
+        // Other types with lower volume
+        query_filters.extend(vec![
+            format!("year:{} type:incollection", year),
+            format!("year:{} type:phdthesis", year),
+            format!("year:{} type:mastersthesis", year),
+            format!("year:{} type:www", year),
+            format!("year:{} type:data", year),
+            format!("year:{} type:informal", year),
+            format!("year:{} type:proceedings", year),
+        ]);
 
-        loop {
-            let url = format!(
-                "{}?q={}&h={}&f={}&format=json",
-                config.base_url, query, config.page_size, first
-            );
+        for query in query_filters {
+            let mut first = 0;
+            const MAX_RESULTS_PER_QUERY: usize = 10_000; // DBLP API limit
 
-            logger::debug(&format!("Fetching DBLP URL: {}", url));
+            loop {
+                let url = format!(
+                    "{}?q={}&h={}&f={}&format=json",
+                    config.base_url, query, config.page_size, first
+                );
 
-            // Disable cache for active years to ensure fresh data
-            let use_cache = config.enable_cache && !is_active_year;
+                logger::debug(&format!("Fetching DBLP URL: {}", url));
 
-            // Use cached fetch if available
-            let body_text =
-                match fetch_url_cached(&client, &url, use_cache, &config.cache_dir).await {
-                    Ok(text) => text,
+                let use_cache = config.enable_cache && !is_active_year;
+                let body_text =
+                    match fetch_url_cached(&client, &url, use_cache, &config.cache_dir).await {
+                        Ok(text) => text,
+                        Err(e) => {
+                            logger::error(&format!("Failed to fetch URL {}: {}", url, e));
+                            break;
+                        }
+                    };
+
+                let dblp_resp: DblpResponse = match serde_json::from_str(&body_text) {
+                    Ok(v) => v,
                     Err(e) => {
-                        logger::error(&format!("Failed to fetch URL {}: {}", url, e));
+                        logger::error(&format!("Failed to parse DBLP JSON: {}", e));
                         break;
                     }
                 };
 
-            // DBLP sometimes returns malformed JSON or unexpected structures?
-            // Parsing
-            let dblp_resp: DblpResponse = match serde_json::from_str(&body_text) {
-                Ok(v) => v,
-                Err(e) => {
-                    logger::error(&format!("Failed to parse DBLP JSON: {}", e));
-                    break;
-                }
-            };
+                let hits = dblp_resp.result.hits.hit;
+                let hits_len = hits.len();
+                let total: usize = match &dblp_resp.result.hits.total {
+                    Value::String(s) => s.parse().unwrap_or(0),
+                    Value::Number(n) => n.as_u64().unwrap_or(0) as usize,
+                    _ => 0,
+                };
 
-            let hits = dblp_resp.result.hits.hit;
-            let hits_len = hits.len();
-            let total: usize = match &dblp_resp.result.hits.total {
-                Value::String(s) => s.parse().unwrap_or(0),
-                Value::Number(n) => n.as_u64().unwrap_or(0) as usize,
-                _ => 0,
-            };
-
-            // Process hits
-            for hit in hits {
-                #[allow(clippy::collapsible_if)]
-                if let Some(record) = hit.info.and_then(convert_hit_to_record) {
-                    if let Err(e) = producer.submit(record) {
-                        logger::error(&format!("Failed to submit record: {}", e));
+                for hit in hits {
+                    #[allow(clippy::collapsible_if)]
+                    if let Some(record) = hit.info.and_then(convert_hit_to_record) {
+                        if let Err(e) = producer.submit(record) {
+                            logger::error(&format!("Failed to submit record: {}", e));
+                        }
                     }
                 }
-            }
 
-            // Pagination logic
-            first += hits_len;
-            if first >= total || hits_len == 0 {
-                break;
-            }
+                first += hits_len;
+                
+                if hits_len == 0 || first >= MAX_RESULTS_PER_QUERY {
+                    break;
+                }
+                
+                if total > 0 && first >= total {
+                    break;
+                }
 
-            // Rate limiting
-            sleep(Duration::from_millis(config.delay_ms)).await;
+                sleep(Duration::from_millis(config.delay_ms)).await;
+            }
         }
     }
 

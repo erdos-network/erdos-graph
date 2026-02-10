@@ -205,7 +205,6 @@ pub async fn scrape_chunk_with_config(
     config: &ZbmathConfig,
     producer: QueueProducer<PublicationRecord>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // let mut all_records = Vec::new();
     let mut resumption_token: Option<String> = None;
 
     loop {
