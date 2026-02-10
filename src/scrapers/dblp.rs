@@ -277,31 +277,36 @@ pub async fn scrape_range_with_config(
 
         // Split year into multiple disjoint queries to work around DBLP's 10K result limit
         let mut query_filters = Vec::new();
-        
+
         // Split inproceedings by venue prefixes
         let conf_prefixes = vec![
-            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q",
+            "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
         ];
         for prefix in conf_prefixes {
-            query_filters.push(format!("year:{} type:inproceedings venue:{}*", year, prefix));
+            query_filters.push(format!(
+                "year:{} type:inproceedings venue:{}*",
+                year, prefix
+            ));
         }
-        
+
         // Split articles by journal prefixes
         let journal_prefixes = vec![
-            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-            "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q",
+            "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
         ];
         for prefix in journal_prefixes {
             query_filters.push(format!("year:{} type:article venue:{}*", year, prefix));
         }
-        
+
         // Books - split by first letter of title
-        for prefix in vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-                           "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"] {
+        for prefix in vec![
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q",
+            "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+        ] {
             query_filters.push(format!("year:{} type:book {}*", year, prefix));
         }
-        
+
         // Other types with lower volume
         query_filters.extend(vec![
             format!("year:{} type:incollection", year),
@@ -313,7 +318,7 @@ pub async fn scrape_range_with_config(
             format!("year:{} type:proceedings", year),
         ]);
 
-        for query in query_filters {
+        for (query_idx, query) in query_filters.iter().enumerate() {
             let mut first = 0;
             const MAX_RESULTS_PER_QUERY: usize = 10_000; // DBLP API limit
 
@@ -361,15 +366,22 @@ pub async fn scrape_range_with_config(
                 }
 
                 first += hits_len;
-                
+
                 if hits_len == 0 || first >= MAX_RESULTS_PER_QUERY {
                     break;
                 }
-                
+
                 if total > 0 && first >= total {
                     break;
                 }
 
+                sleep(Duration::from_millis(config.delay_ms)).await;
+            }
+
+            // Rate limit between queries, with longer pauses periodically to avoid 429 errors
+            if (query_idx + 1) % config.long_pause_frequency == 0 {
+                sleep(Duration::from_millis(config.long_pause_ms)).await;
+            } else {
                 sleep(Duration::from_millis(config.delay_ms)).await;
             }
         }

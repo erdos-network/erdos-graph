@@ -92,6 +92,9 @@ fn default_mega_paper_threshold() -> usize {
 fn default_max_edges_per_author() -> usize {
     5_000
 }
+fn default_max_authors_to_prefetch() -> usize {
+    500
+}
 fn default_prefetch_skip_bloom_threshold() -> f64 {
     0.95
 }
@@ -121,6 +124,9 @@ pub struct IngestionConfig {
     /// Maximum edges to prefetch per author to bound query cost
     #[serde(default = "default_max_edges_per_author")]
     pub max_edges_per_author: usize,
+    /// Maximum total authors to prefetch in a batch to avoid expensive prefetches
+    #[serde(default = "default_max_authors_to_prefetch")]
+    pub max_authors_to_prefetch: usize,
     /// Bloom hit rate threshold to skip prefetch for mega-papers (0.0-1.0)
     #[serde(default = "default_prefetch_skip_bloom_threshold")]
     pub prefetch_skip_bloom_threshold: f64,
@@ -140,6 +146,7 @@ impl Default for IngestionConfig {
             estimated_edges_per_paper: default_estimated_edges_per_paper(),
             mega_paper_threshold: default_mega_paper_threshold(),
             max_edges_per_author: default_max_edges_per_author(),
+            max_authors_to_prefetch: default_max_authors_to_prefetch(),
             prefetch_skip_bloom_threshold: default_prefetch_skip_bloom_threshold(),
             bloom_sample_size: default_bloom_sample_size(),
         }
@@ -176,6 +183,12 @@ pub struct DblpSourceConfig {
     pub enable_cache: bool,
     #[serde(default = "default_dblp_cache_dir")]
     pub cache_dir: String,
+    /// Frequency of longer pauses (every N queries)
+    #[serde(default = "default_dblp_long_pause_frequency")]
+    pub long_pause_frequency: usize,
+    /// Duration of longer pause in milliseconds
+    #[serde(default = "default_dblp_long_pause_ms")]
+    pub long_pause_ms: u64,
 }
 
 impl Default for DblpSourceConfig {
@@ -186,6 +199,8 @@ impl Default for DblpSourceConfig {
             delay_ms: default_dblp_delay_ms(),
             enable_cache: default_dblp_enable_cache(),
             cache_dir: default_dblp_cache_dir(),
+            long_pause_frequency: default_dblp_long_pause_frequency(),
+            long_pause_ms: default_dblp_long_pause_ms(),
         }
     }
 }
@@ -204,6 +219,12 @@ fn default_dblp_enable_cache() -> bool {
 }
 fn default_dblp_cache_dir() -> String {
     ".dblp_cache".to_string()
+}
+fn default_dblp_long_pause_frequency() -> usize {
+    10
+}
+fn default_dblp_long_pause_ms() -> u64 {
+    2000
 }
 
 #[derive(Deserialize, Clone, Debug)]

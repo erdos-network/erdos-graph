@@ -31,9 +31,10 @@ mod tests {
         let config = DblpSourceConfig {
             base_url: mock_url.to_string(),
             page_size: 100,
-            delay_ms: 0, // No delay for tests
+            delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
@@ -280,6 +281,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         // Date setup
@@ -312,6 +314,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         // Historic year: 2020.
@@ -367,6 +370,7 @@ mod tests {
             delay_ms: 10,
             enable_cache: true,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
         let scraper = DblpScraper::with_config(config);
         assert!(
@@ -407,6 +411,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         let scraper = DblpScraper::with_config(config);
@@ -457,6 +462,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         let start = Utc.with_ymd_and_hms(2022, 1, 1, 0, 0, 0).unwrap();
@@ -599,7 +605,8 @@ mod tests {
             page_size: 100,
             delay_ms: 0,
             enable_cache: true,
-            cache_dir: cache_dir.to_string_lossy().to_string(), // Use absolute path
+            cache_dir: cache_dir.to_string_lossy().to_string(),
+            ..Default::default()
         };
 
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
@@ -863,8 +870,9 @@ mod tests {
             base_url: server.url(),
             page_size: 100,
             delay_ms: 0,
-            enable_cache: true,                                 // Cache is enabled
-            cache_dir: cache_dir.to_string_lossy().to_string(), // Use absolute path
+            enable_cache: true, // Cache is enabled
+            cache_dir: cache_dir.to_string_lossy().to_string(),
+            ..Default::default()
         };
 
         // First scrape
