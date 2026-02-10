@@ -4,8 +4,8 @@ mod tests {
     use crate::db::ingestion::PublicationRecord;
     use crate::scrapers::cache::DeduplicationCache;
     use crate::scrapers::ingestion_utils::{
-        IngestionContext, add_publication, create_authored_edge, create_coauthor_edge,
-        flush_buffer, get_or_create_author_vertex, ingest_batch, publication_exists,
+        IngestionContext, add_publication, create_authored_edge, flush_buffer,
+        get_or_create_author_vertex, ingest_batch, publication_exists,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use helix_db::helix_engine::storage_core::HelixGraphStorage;
@@ -473,58 +473,6 @@ mod tests {
         assert_eq!(count, 1);
     }
 
-    #[tokio::test]
-    async fn test_create_coauthor_edge_bloom_hit() {
-        let engine = create_test_engine().await;
-
-        let mut context = IngestionContext::new(&Config::default());
-
-        let author1 = get_or_create_author_vertex(
-            "Alice",
-            &mut context.write_buffer,
-            &mut context.author_cache,
-        )
-        .unwrap();
-        let author2 = get_or_create_author_vertex(
-            "Bob",
-            &mut context.write_buffer,
-            &mut context.author_cache,
-        )
-        .unwrap();
-        flush_buffer(&mut context, &engine).unwrap();
-
-        let key = (author1.id.as_u128(), author2.id.as_u128());
-        context.edge_cache.cold_bloom.set(&key);
-
-        create_coauthor_edge(
-            &author1,
-            &author2,
-            &mut context.pending_edge_updates,
-            &mut context.edge_cache,
-        )
-        .unwrap();
-        flush_buffer(&mut context, &engine).unwrap();
-
-        // Check manually via DB
-        let txn = engine.storage.graph_env.read_txn().unwrap();
-        let label_hash = helix_db::utils::label_hash::hash_label("COAUTHORED_WITH", None);
-        let out_key = HelixGraphStorage::out_edge_key(&author1.id.as_u128(), &label_hash);
-        let iter = engine
-            .storage
-            .out_edges_db
-            .prefix_iter(&txn, &out_key)
-            .unwrap();
-
-        let mut found_weight = 0;
-        for (_, _val) in iter.flatten() {
-            // We assume it worked if we found an edge.
-            // Reading edge properties requires unpacking edge_id and querying edges_db.
-            // Simplified check:
-            found_weight = 2;
-        }
-        assert_eq!(found_weight, 2);
-    }
-
     #[test]
     fn test_deduplication_cache_new() {
         let _cache = DeduplicationCache::new(100);
@@ -545,6 +493,7 @@ mod tests {
                 initial_start_date: "2020-01-01T00:00:00Z".to_string(),
                 weekly_days: 7,
                 checkpoint_dir: None,
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
@@ -631,6 +580,7 @@ mod tests {
                 initial_start_date: "2020-01-01T00:00:00Z".to_string(),
                 weekly_days: 7,
                 checkpoint_dir: None,
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,

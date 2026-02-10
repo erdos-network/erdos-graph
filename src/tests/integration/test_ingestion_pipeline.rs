@@ -61,6 +61,7 @@ mod tests {
                 initial_start_date: (Utc::now() - Duration::days(2)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
@@ -110,6 +111,7 @@ mod tests {
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
@@ -163,6 +165,7 @@ mod tests {
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 1,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
@@ -214,6 +217,7 @@ mod tests {
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 2,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
@@ -291,6 +295,7 @@ mod tests {
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,
@@ -336,6 +341,7 @@ mod tests {
                 initial_start_date: (Utc::now() - Duration::days(14)).to_rfc3339(),
                 weekly_days: 7,
                 checkpoint_dir: Some(checkpoint_dir.to_str().unwrap().to_string()),
+                ..Default::default()
             },
             deduplication: DeduplicationConfig {
                 title_similarity_threshold: 0.9,

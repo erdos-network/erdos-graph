@@ -86,6 +86,18 @@ fn default_edge_warm_size() -> usize {
 fn default_edge_bloom_size() -> usize {
     100_000_000
 }
+fn default_mega_paper_threshold() -> usize {
+    50
+}
+fn default_max_edges_per_author() -> usize {
+    5_000
+}
+fn default_prefetch_skip_bloom_threshold() -> f64 {
+    0.95
+}
+fn default_bloom_sample_size() -> usize {
+    100
+}
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct IngestionConfig {
@@ -97,6 +109,24 @@ pub struct IngestionConfig {
     pub weekly_days: u64,
     /// Directory to store checkpoint files (defaults to "checkpoints")
     pub checkpoint_dir: Option<String>,
+    /// Write buffer initial capacity
+    #[serde(default = "default_write_buffer_capacity")]
+    pub write_buffer_capacity: usize,
+    /// Estimated edges per paper for bloom filter sizing
+    #[serde(default = "default_estimated_edges_per_paper")]
+    pub estimated_edges_per_paper: usize,
+    /// Threshold for considering a paper a "mega-paper" (number of authors)
+    #[serde(default = "default_mega_paper_threshold")]
+    pub mega_paper_threshold: usize,
+    /// Maximum edges to prefetch per author to bound query cost
+    #[serde(default = "default_max_edges_per_author")]
+    pub max_edges_per_author: usize,
+    /// Bloom hit rate threshold to skip prefetch for mega-papers (0.0-1.0)
+    #[serde(default = "default_prefetch_skip_bloom_threshold")]
+    pub prefetch_skip_bloom_threshold: f64,
+    /// Number of edges to sample for estimating bloom coverage
+    #[serde(default = "default_bloom_sample_size")]
+    pub bloom_sample_size: usize,
 }
 
 impl Default for IngestionConfig {
@@ -106,8 +136,22 @@ impl Default for IngestionConfig {
             initial_start_date: "1932-01-01T00:00:00Z".to_string(),
             weekly_days: 7,
             checkpoint_dir: None,
+            write_buffer_capacity: default_write_buffer_capacity(),
+            estimated_edges_per_paper: default_estimated_edges_per_paper(),
+            mega_paper_threshold: default_mega_paper_threshold(),
+            max_edges_per_author: default_max_edges_per_author(),
+            prefetch_skip_bloom_threshold: default_prefetch_skip_bloom_threshold(),
+            bloom_sample_size: default_bloom_sample_size(),
         }
     }
+}
+
+fn default_write_buffer_capacity() -> usize {
+    5000
+}
+
+fn default_estimated_edges_per_paper() -> usize {
+    50
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]

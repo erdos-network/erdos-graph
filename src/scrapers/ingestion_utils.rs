@@ -23,6 +23,14 @@ pub(crate) enum WriteOperation {
     CreateEdge(GraphEdge),
 }
 
+/// Statistics for analyzing mega-paper edge processing.
+#[derive(Default)]
+struct MegaPaperStats {
+    total_pairs: usize,
+    bloom_hits: usize,
+    cache_hits: usize,
+}
+
 /// Context for ingestion to maintain caches
 pub(crate) struct IngestionContext {
     pub dedup_cache: DeduplicationCache,
@@ -38,7 +46,7 @@ impl IngestionContext {
             dedup_cache: DeduplicationCache::new(config.deduplication.bloom_filter_size),
             author_cache: HashMap::new(),
             edge_cache: EdgeCacheSystem::new(config.edge_cache.clone()),
-            write_buffer: Vec::with_capacity(5000),
+            write_buffer: Vec::with_capacity(config.ingestion.write_buffer_capacity),
             pending_edge_updates: HashMap::new(),
         }
     }
@@ -108,69 +116,6 @@ impl IngestionContext {
             count,
             start.elapsed().as_millis()
         ));
-        Ok(())
-    }
-
-    /// Prefetch specific edge edges
-    pub(crate) fn prefetch_coauthor_edges(
-        &mut self,
-        edge_keys: &[(u128, u128)],
-        engine: &Arc<HelixGraphEngine>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if edge_keys.is_empty() {
-            return Ok(());
-        }
-
-        let txn = engine.storage.graph_env.read_txn()?;
-        let arena = Bump::new();
-
-        use crate::db::schema::COAUTHORED_WITH_TYPE;
-        let label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, None);
-
-        // Optimization: Group by source to avoid creating an iterator for every pair
-        let mut adjacency_requests: HashMap<u128, HashSet<u128>> = HashMap::new();
-        for &(u, v) in edge_keys {
-            if self.edge_cache.get((u, v)).is_none() && self.edge_cache.exists((u, v)) {
-                adjacency_requests.entry(u).or_default().insert(v);
-            }
-        }
-
-        for (u, targets) in adjacency_requests {
-            let out_key = HelixGraphStorage::out_edge_key(&u, &label_hash);
-
-            if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
-                for (_, val_bytes) in iter.flatten() {
-                    if val_bytes.len() >= 32 {
-                        let mut to_node_bytes = [0u8; 16];
-                        to_node_bytes.copy_from_slice(&val_bytes[16..32]);
-                        let to_node_id = u128::from_be_bytes(to_node_bytes);
-
-                        if targets.contains(&to_node_id) {
-                            let mut edge_id_bytes = [0u8; 16];
-                            edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
-                            let edge_id = u128::from_be_bytes(edge_id_bytes);
-
-                            if let Ok(Some(edge_bytes)) =
-                                engine.storage.edges_db.get(&txn, &edge_id)
-                                && let Ok(edge) =
-                                    Edge::from_bincode_bytes(edge_id, edge_bytes, &arena)
-                                && let Some(props) = edge.properties
-                                && let Some(w_val) = props.get("weight")
-                            {
-                                let weight = match w_val {
-                                    HelixValue::U64(w) => *w,
-                                    HelixValue::I64(w) => *w as u64,
-                                    HelixValue::F64(w) => *w as u64,
-                                    _ => 1,
-                                };
-                                self.edge_cache.put((u, to_node_id), weight);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         Ok(())
     }
 }
@@ -274,33 +219,8 @@ pub(crate) fn flush_buffer(
     let mut wtxn = engine.storage.graph_env.write_txn()?;
     let arena = Bump::new();
 
-    // 1. Convert pending edge updates to WriteOperations
-    // We need to fetch current weights from DB if they weren't in cache
-    for ((u_id, v_id), increment) in context.pending_edge_updates.drain() {
-        let key = (u_id, v_id);
-
-        // Determine final weight
-        let final_weight = if let Some(cached) = context.edge_cache.get(key) {
-            // If it was in cache, the cache already has the incremented value
-            // because we updated it in create_coauthor_edge
-            cached
-        } else {
-            // Not in hot cache, check DB
-            // Note: In a real implementation we might want to batch this read too,
-            // but for now we trust the "prefetch_coauthor_edges" did its job
-            // or we take the hit for cold edges.
-            // Since we updated cache.put(key, 1) or similar in create_coauthor_edge
-            // for new edges, this branch is mostly for "exists in bloom but not LRU" cases.
-            match fetch_weight_from_db(u_id, v_id, engine, &wtxn)? {
-                Some(w) => w + increment,
-                None => increment,
-            }
-        };
-
-        // Update cache with final confirmed weight
-        context.edge_cache.put(key, final_weight);
-
-        // Create the edge operations
+    // Convert pending edge updates to bidirectional write operations
+    for ((u_id, v_id), final_weight) in context.pending_edge_updates.drain() {
         let u_uuid = Uuid::from_u128(u_id);
         let v_uuid = Uuid::from_u128(v_id);
 
@@ -385,45 +305,68 @@ pub(crate) fn flush_buffer(
     Ok(())
 }
 
-fn fetch_weight_from_db(
-    u: u128,
-    v: u128,
+/// Bulk prefetch co-author edges for a set of authors to warm the cache.
+fn bulk_prefetch_author_edges(
+    author_ids: &HashSet<u128>,
     engine: &Arc<HelixGraphEngine>,
-    txn: &heed3::RwTxn,
-) -> Result<Option<u64>, Box<dyn std::error::Error>> {
-    use crate::db::schema::COAUTHORED_WITH_TYPE;
-    let label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, None);
-    let out_key = HelixGraphStorage::out_edge_key(&u, &label_hash);
+    edge_cache: &mut EdgeCacheSystem,
+    max_edges_per_author: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if author_ids.is_empty() {
+        return Ok(());
+    }
+
+    let txn = engine.storage.graph_env.read_txn()?;
     let arena = Bump::new();
 
-    if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(txn, &out_key) {
-        for (_, val_bytes) in iter.flatten() {
-            if val_bytes.len() >= 32 {
-                let mut to_node_bytes = [0u8; 16];
-                to_node_bytes.copy_from_slice(&val_bytes[16..32]);
-                let to_node_id = u128::from_be_bytes(to_node_bytes);
+    use crate::db::schema::COAUTHORED_WITH_TYPE;
+    let label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, None);
 
-                if to_node_id == v {
+    for &author_id in author_ids {
+        let out_key = HelixGraphStorage::out_edge_key(&author_id, &label_hash);
+        let mut edges_processed = 0;
+
+        if let Ok(iter) = engine.storage.out_edges_db.prefix_iter(&txn, &out_key) {
+            for (_, val_bytes) in iter.flatten() {
+                if edges_processed >= max_edges_per_author {
+                    break;
+                }
+                edges_processed += 1;
+
+                if val_bytes.len() >= 32 {
+                    let mut to_node_bytes = [0u8; 16];
+                    to_node_bytes.copy_from_slice(&val_bytes[16..32]);
+                    let to_node_id = u128::from_be_bytes(to_node_bytes);
+
                     let mut edge_id_bytes = [0u8; 16];
                     edge_id_bytes.copy_from_slice(&val_bytes[0..16]);
                     let edge_id = u128::from_be_bytes(edge_id_bytes);
 
-                    if let Ok(Some(edge_bytes)) = engine.storage.edges_db.get(txn, &edge_id)
+                    if let Ok(Some(edge_bytes)) = engine.storage.edges_db.get(&txn, &edge_id)
                         && let Ok(edge) = Edge::from_bincode_bytes(edge_id, edge_bytes, &arena)
                         && let Some(props) = edge.properties
                         && let Some(w_val) = props.get("weight")
                     {
-                        return Ok(match w_val {
-                            HelixValue::U64(w) => Some(*w),
-                            HelixValue::I64(w) => Some(*w as u64),
-                            _ => Some(1),
-                        });
+                        let weight = match w_val {
+                            HelixValue::U64(w) => *w,
+                            HelixValue::I64(w) => *w as u64,
+                            HelixValue::F64(w) => *w as u64,
+                            _ => 1,
+                        };
+
+                        let key = if author_id < to_node_id {
+                            (author_id, to_node_id)
+                        } else {
+                            (to_node_id, author_id)
+                        };
+                        edge_cache.put(key, weight);
                     }
                 }
             }
         }
     }
-    Ok(None)
+
+    Ok(())
 }
 
 /// Ingests a batch of publication records into the database.
@@ -495,39 +438,147 @@ pub(crate) async fn ingest_batch(
         record_author_vertices.push(authors_for_rec);
     }
 
-    let mut edges_to_prefetch = HashSet::new();
+    use bloomfilter::Bloom;
+
+    // Collect all unique authors and identify mega-papers
+    let mut batch_author_ids: HashSet<u128> = HashSet::new();
+    let mut has_mega_paper = false;
+    let mega_threshold = config.ingestion.mega_paper_threshold;
+
     for authors in &record_author_vertices {
+        if authors.len() > mega_threshold {
+            has_mega_paper = true;
+        }
+        for author in authors {
+            batch_author_ids.insert(author.id.as_u128());
+        }
+    }
+
+    // For mega-papers, sample edges to estimate bloom coverage and skip prefetch if high
+    let prefetch_start = Instant::now();
+    let skip_prefetch = if has_mega_paper {
+        let mut sample_hits = 0;
+        let mut sample_total = 0;
+        let sample_size = config.ingestion.bloom_sample_size;
+        let sample_authors = (sample_size as f64).sqrt().ceil() as usize;
+
+        'sampling: for authors in &record_author_vertices {
+            if authors.len() <= mega_threshold {
+                continue;
+            }
+            for i in 0..authors.len().min(sample_authors) {
+                for j in (i + 1)..authors.len().min(sample_authors) {
+                    let id1 = authors[i].id.as_u128();
+                    let id2 = authors[j].id.as_u128();
+                    let key = if id1 < id2 { (id1, id2) } else { (id2, id1) };
+
+                    if context.edge_cache.cold_bloom.check(&key) {
+                        sample_hits += 1;
+                    }
+                    sample_total += 1;
+
+                    if sample_total >= sample_size {
+                        break 'sampling;
+                    }
+                }
+            }
+        }
+
+        // Skip prefetch if bloom hit rate exceeds threshold
+        sample_total > 0
+            && (sample_hits as f64 / sample_total as f64)
+                > config.ingestion.prefetch_skip_bloom_threshold
+    } else {
+        false
+    };
+
+    if !skip_prefetch
+        && let Err(e) = bulk_prefetch_author_edges(
+            &batch_author_ids,
+            &engine,
+            &mut context.edge_cache,
+            config.ingestion.max_edges_per_author,
+        )
+    {
+        logger::error(&format!("Failed to bulk prefetch author edges: {}", e));
+    }
+    let prefetch_time = prefetch_start.elapsed().as_millis();
+
+    // Generate edge pairs with cache warmed
+    let estimated_edges = new_records.len() * config.ingestion.estimated_edges_per_paper;
+    let mut batch_edge_bloom = Bloom::new_for_fp_rate(estimated_edges, 0.01)
+        .unwrap_or_else(|_| Bloom::new_for_fp_rate(10000, 0.01).unwrap());
+
+    let mut batch_edge_weights: HashMap<(u128, u128), u64> = HashMap::new();
+
+    // Track statistics for mega-papers
+    let mut mega_paper_stats = MegaPaperStats::default();
+
+    let edge_gen_start = Instant::now();
+    for authors in &record_author_vertices {
+        let is_mega = authors.len() > mega_threshold;
+
         for i in 0..authors.len() {
             for j in (i + 1)..authors.len() {
                 let id1 = authors[i].id.as_u128();
                 let id2 = authors[j].id.as_u128();
-                edges_to_prefetch.insert((id1, id2));
-                edges_to_prefetch.insert((id2, id1));
+                let key = if id1 < id2 { (id1, id2) } else { (id2, id1) };
+
+                if is_mega {
+                    mega_paper_stats.total_pairs += 1;
+
+                    // Check bloom first (cheap)
+                    if context.edge_cache.cold_bloom.check(&key) {
+                        mega_paper_stats.bloom_hits += 1;
+                        // Check cache second (more expensive)
+                        if context.edge_cache.get(key).is_some() {
+                            mega_paper_stats.cache_hits += 1;
+                        }
+                    }
+                }
+
+                if batch_edge_bloom.check(&key) {
+                    *batch_edge_weights.entry(key).or_insert(0) += 1;
+                } else {
+                    batch_edge_bloom.set(&key);
+                    batch_edge_weights.insert(key, 1);
+                }
             }
         }
     }
+    let edge_gen_time = edge_gen_start.elapsed().as_millis();
 
-    let edges_vec: Vec<(u128, u128)> = edges_to_prefetch.into_iter().collect();
+    if has_mega_paper {
+        let bloom_hit_pct = if mega_paper_stats.total_pairs > 0 {
+            (mega_paper_stats.bloom_hits as f64 / mega_paper_stats.total_pairs as f64) * 100.0
+        } else {
+            0.0
+        };
+        let cache_hit_pct = if mega_paper_stats.total_pairs > 0 {
+            (mega_paper_stats.cache_hits as f64 / mega_paper_stats.total_pairs as f64) * 100.0
+        } else {
+            0.0
+        };
 
-    if !edges_vec.is_empty()
-        && let Err(e) = context.prefetch_coauthor_edges(&edges_vec, &engine)
-    {
-        logger::error(&format!("Failed to prefetch batch co-author edges: {}", e));
+        logger::debug(&format!(
+            "Mega-paper metrics: {} pairs, bloom hits: {} ({:.1}%), cache hits: {} ({:.1}%), prefetch: {}ms, generation: {}ms",
+            mega_paper_stats.total_pairs,
+            mega_paper_stats.bloom_hits,
+            bloom_hit_pct,
+            mega_paper_stats.cache_hits,
+            cache_hit_pct,
+            prefetch_time,
+            edge_gen_time
+        ));
     }
 
-    for authors in record_author_vertices {
-        for i in 0..authors.len() {
-            for j in (i + 1)..authors.len() {
-                let author1 = &authors[i];
-                let author2 = &authors[j];
-                create_coauthor_edge(
-                    author1,
-                    author2,
-                    &mut context.pending_edge_updates,
-                    &mut context.edge_cache,
-                )?;
-            }
-        }
+    // Calculate final weights and prepare for flush
+    for (key, batch_increment) in batch_edge_weights {
+        let current_weight = context.edge_cache.get(key).unwrap_or(0);
+        let final_weight = current_weight + batch_increment;
+
+        context.edge_cache.put(key, final_weight);
+        *context.pending_edge_updates.entry(key).or_insert(0) = final_weight;
     }
 
     flush_buffer(context, &engine)?;
@@ -586,42 +637,6 @@ pub(crate) fn create_authored_edge(
     let edge_type = crate::db::schema::AUTHORED_TYPE;
     let edge = GraphEdge::new(author.id, publication.id, edge_type);
     write_buffer.push(WriteOperation::CreateEdge(edge));
-    Ok(())
-}
-
-/// Create co-author edge with weight (buffered)
-pub(crate) fn create_coauthor_edge(
-    author1: &GraphVertex,
-    author2: &GraphVertex,
-    pending_updates: &mut HashMap<(u128, u128), u64>,
-    edge_cache: &mut EdgeCacheSystem,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (u, v) = if author1.id < author2.id {
-        (author1, author2)
-    } else {
-        (author2, author1)
-    };
-
-    let key = (u.id.as_u128(), v.id.as_u128());
-
-    // Update local batch counter
-    *pending_updates.entry(key).or_insert(0) += 1;
-
-    // We also speculatively update the cache so subsequent lookups in this batch
-    // (if we were still reading from it) would be correct-ish, though strict consistency
-    // is handled by the flush.
-    let cached_weight = edge_cache.get(key);
-    if let Some(current_weight) = cached_weight {
-        edge_cache.put(key, current_weight + 1);
-    } else if edge_cache.exists(key) {
-        // If it exists in bloom but not LRU, we don't know the exact weight yet.
-        // We will resolve this during flush.
-        // For now, just mark it as "seen" in cache if you want, or do nothing.
-    } else {
-        // New edge entirely
-        edge_cache.put(key, 1);
-    }
-
     Ok(())
 }
 
