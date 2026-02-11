@@ -17,13 +17,13 @@ use textdistance::{Algorithm, Cosine};
 /// Helper struct to manage deduplication caching.
 pub(crate) struct DeduplicationCache {
     /// Track which years have been loaded into the Bloom filters
-    loaded_years: HashSet<u32>,
+    pub(crate) loaded_years: HashSet<u32>,
     /// Global Bloom Filter for Titles
-    title_filter: Bloom<String>,
+    pub(crate) title_filter: Bloom<String>,
     /// Global Bloom Filter for Authors
-    author_filter: Bloom<String>,
+    pub(crate) author_filter: Bloom<String>,
     /// Cache of known publication IDs (external IDs like arxiv:...) to avoid DB lookups
-    published_ids: HashSet<String>,
+    pub(crate) published_ids: HashSet<String>,
 }
 
 impl DeduplicationCache {
@@ -282,8 +282,8 @@ impl DeduplicationCache {
 /// Normalizes a title for Bloom filter and comparison.
 pub(crate) fn normalize_title(title: &str) -> String {
     let stop_words: HashSet<&str> = [
-        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is",
-        "it", "its", "of", "on", "that", "the", "to", "was", "were", "will", "with",
+        "a", "an", "and", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it",
+        "its", "of", "on", "or", "that", "the", "to", "was", "were", "will",
     ]
     .iter()
     .cloned()

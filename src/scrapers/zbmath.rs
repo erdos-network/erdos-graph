@@ -13,7 +13,7 @@ const ZBMATH_BASE_URL: &str = "https://oai.zbmath.org/v1/";
 /// ZbMATH scraper that implements the Scraper trait.
 #[derive(Clone, Debug)]
 pub struct ZbmathScraper {
-    config: ZbmathConfig,
+    pub config: ZbmathConfig,
 }
 
 impl ZbmathScraper {
@@ -341,6 +341,10 @@ pub(crate) fn convert_to_publication_record(
 
     // Extract year from date field
     let year = if let Some(date_str) = dc.date {
+        let date_str = date_str.trim();
+        if date_str.len() < 4 {
+            return Ok(None);
+        }
         // Try to parse year from various date formats
         if let Ok(year_match) = date_str.chars().take(4).collect::<String>().parse::<u32>() {
             year_match
