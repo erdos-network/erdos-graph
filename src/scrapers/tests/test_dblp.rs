@@ -31,9 +31,10 @@ mod tests {
         let config = DblpSourceConfig {
             base_url: mock_url.to_string(),
             page_size: 100,
-            delay_ms: 0, // No delay for tests
+            delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
@@ -81,7 +82,9 @@ mod tests {
 
         assert!(result.is_ok());
         let records = result.unwrap();
-        assert_eq!(records.len(), 1);
+        // With multi-query strategy, each year makes 85 queries (26 conf + 26 journal + 26 book + 7 other)
+        // Each query returns the same mock record, so we get 85 duplicates
+        assert_eq!(records.len(), 85);
         assert_eq!(records[0].title, "Test Article");
         assert_eq!(records[0].authors, vec!["John Smith"]);
         assert_eq!(records[0].year, 2023);
@@ -216,7 +219,8 @@ mod tests {
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
-        assert_eq!(records.len(), 2);
+        // With multi-query strategy: 85 queries × 2 records per query = 170 records
+        assert_eq!(records.len(), 170);
     }
 
     #[tokio::test]
@@ -260,9 +264,10 @@ mod tests {
         let records = test_scrape_range_with_mock_url(start, end, &server.url())
             .await
             .unwrap();
-        assert_eq!(records.len(), 2);
+        // Multi-query strategy: 85 queries × 2 records = 170 total
+        assert_eq!(records.len(), 170);
         assert_eq!(records[0].authors[0], "Name1");
-        assert_eq!(records[1].authors[0], "Name2");
+        assert_eq!(records[85].authors[0], "Name2");
     }
 
     #[tokio::test]
@@ -276,6 +281,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         // Date setup
@@ -308,6 +314,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         // Historic year: 2020.
@@ -315,12 +322,13 @@ mod tests {
         let start = Utc.with_ymd_and_hms(2019, 12, 31, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap();
 
-        // Expect request for 2020
+        // Expect request for 2020 (multi-query strategy: 85 queries per year)
         let _m2020 = server
             .mock("GET", "/")
             .match_query(mockito::Matcher::Regex("q=year(:|%3A)2020.*".into()))
             .with_status(200)
             .with_body(r#"{"result":{"hits":{"hit":[],"sent":0,"total":0}}}"#)
+            .expect(85)
             .create_async()
             .await;
 
@@ -362,6 +370,7 @@ mod tests {
             delay_ms: 10,
             enable_cache: true,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
         let scraper = DblpScraper::with_config(config);
         assert!(
@@ -402,6 +411,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         let scraper = DblpScraper::with_config(config);
@@ -418,7 +428,8 @@ mod tests {
         }
         assert!(result.is_ok());
         // let records = result.unwrap(); // Removed shadowing
-        assert_eq!(records.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(records.len(), 85);
     }
 
     #[tokio::test]
@@ -451,6 +462,7 @@ mod tests {
             delay_ms: 0,
             enable_cache: false,
             cache_dir: ".dblp_cache".to_string(),
+            ..Default::default()
         };
 
         let start = Utc.with_ymd_and_hms(2022, 1, 1, 0, 0, 0).unwrap();
@@ -466,7 +478,8 @@ mod tests {
         }
         assert!(result.is_ok());
         // let records = result.unwrap(); // Removed shadowing
-        assert_eq!(records.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(records.len(), 85);
     }
 
     #[tokio::test]
@@ -555,7 +568,8 @@ mod tests {
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
-        assert_eq!(records.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(records.len(), 85);
     }
 
     #[tokio::test]
@@ -582,7 +596,7 @@ mod tests {
             .match_query(mockito::Matcher::Regex("q=year(:|%3A)2023.*".into()))
             .with_status(200)
             .with_body(response_body.clone())
-            .expect(1) // Should only be called once due to caching
+            .expect(85) // Multi-query strategy: 85 queries per year
             .create_async()
             .await;
 
@@ -591,7 +605,8 @@ mod tests {
             page_size: 100,
             delay_ms: 0,
             enable_cache: true,
-            cache_dir: cache_dir.to_string_lossy().to_string(), // Use absolute path
+            cache_dir: cache_dir.to_string_lossy().to_string(),
+            ..Default::default()
         };
 
         let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
@@ -607,7 +622,8 @@ mod tests {
         while let Some(r) = queue1.dequeue() {
             recs1.push(r);
         }
-        assert_eq!(recs1.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(recs1.len(), 85);
 
         // Second call - should use cache
         let queue2 = ThreadSafeQueue::new(QueueConfig::default());
@@ -619,7 +635,8 @@ mod tests {
         while let Some(r) = queue2.dequeue() {
             recs2.push(r);
         }
-        assert_eq!(recs2.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(recs2.len(), 85);
 
         // Verify cache directory was created
         assert!(cache_dir.exists());
@@ -655,7 +672,8 @@ mod tests {
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
-        assert_eq!(records.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(records.len(), 85);
         assert_eq!(records[0].authors, vec!["Solo Author"]);
     }
 
@@ -689,7 +707,8 @@ mod tests {
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
-        assert_eq!(records.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(records.len(), 85);
         assert_eq!(records[0].title, "Part 1 Part 2");
     }
 
@@ -724,7 +743,8 @@ mod tests {
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
-        assert_eq!(records.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(records.len(), 85);
         assert_eq!(records[0].venue, Some("Conference, Workshop".to_string()));
     }
 
@@ -791,7 +811,8 @@ mod tests {
         let result = test_scrape_range_with_mock_url(start, end, &server.url()).await;
         assert!(result.is_ok());
         let records = result.unwrap();
-        assert_eq!(records.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(records.len(), 85);
         assert_eq!(records[0].id, "unknown");
     }
 
@@ -836,7 +857,7 @@ mod tests {
             )))
             .with_status(200)
             .with_body(response_v1)
-            .expect(1)
+            .expect(85) // Multi-query strategy: 85 queries per year
             .create_async()
             .await;
 
@@ -849,8 +870,9 @@ mod tests {
             base_url: server.url(),
             page_size: 100,
             delay_ms: 0,
-            enable_cache: true,                                 // Cache is enabled
-            cache_dir: cache_dir.to_string_lossy().to_string(), // Use absolute path
+            enable_cache: true, // Cache is enabled
+            cache_dir: cache_dir.to_string_lossy().to_string(),
+            ..Default::default()
         };
 
         // First scrape
@@ -863,7 +885,8 @@ mod tests {
         while let Some(r) = queue1.dequeue() {
             recs1.push(r);
         }
-        assert_eq!(recs1.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(recs1.len(), 85);
         assert_eq!(recs1[0].title, "Paper V1");
 
         // Mock now returns V2 (simulating new papers added)
@@ -875,7 +898,7 @@ mod tests {
             )))
             .with_status(200)
             .with_body(response_v2)
-            .expect(1) // Should hit server again despite cache being enabled
+            .expect(85) // Multi-query strategy: 85 queries per year // Should hit server again despite cache being enabled
             .create_async()
             .await;
 
@@ -889,7 +912,8 @@ mod tests {
         while let Some(r) = queue2.dequeue() {
             recs2.push(r);
         }
-        assert_eq!(recs2.len(), 1);
+        // Multi-query strategy: 85 queries per year
+        assert_eq!(recs2.len(), 85);
         assert_eq!(recs2[0].title, "Paper V2"); // Should get fresh data, not cached V1
     }
 }

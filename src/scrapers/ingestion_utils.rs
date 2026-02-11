@@ -306,11 +306,13 @@ pub(crate) fn flush_buffer(
 }
 
 /// Bulk prefetch co-author edges for a set of authors to warm the cache.
+/// Uses a limit on total authors to avoid expensive prefetches for mega-paper batches.
 fn bulk_prefetch_author_edges(
     author_ids: &HashSet<u128>,
     engine: &Arc<HelixGraphEngine>,
     edge_cache: &mut EdgeCacheSystem,
     max_edges_per_author: usize,
+    max_authors_to_prefetch: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if author_ids.is_empty() {
         return Ok(());
@@ -322,7 +324,9 @@ fn bulk_prefetch_author_edges(
     use crate::db::schema::COAUTHORED_WITH_TYPE;
     let label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, None);
 
-    for &author_id in author_ids {
+    let authors_to_process = author_ids.iter().take(max_authors_to_prefetch);
+
+    for &author_id in authors_to_process {
         let out_key = HelixGraphStorage::out_edge_key(&author_id, &label_hash);
         let mut edges_processed = 0;
 
@@ -498,6 +502,7 @@ pub(crate) async fn ingest_batch(
             &engine,
             &mut context.edge_cache,
             config.ingestion.max_edges_per_author,
+            config.ingestion.max_authors_to_prefetch,
         )
     {
         logger::error(&format!("Failed to bulk prefetch author edges: {}", e));
@@ -518,30 +523,45 @@ pub(crate) async fn ingest_batch(
     for authors in &record_author_vertices {
         let is_mega = authors.len() > mega_threshold;
 
-        for i in 0..authors.len() {
-            for j in (i + 1)..authors.len() {
-                let id1 = authors[i].id.as_u128();
-                let id2 = authors[j].id.as_u128();
-                let key = if id1 < id2 { (id1, id2) } else { (id2, id1) };
+        if is_mega {
+            // Separate path for mega-papers to track statistics
+            for i in 0..authors.len() {
+                for j in (i + 1)..authors.len() {
+                    let id1 = authors[i].id.as_u128();
+                    let id2 = authors[j].id.as_u128();
+                    let key = if id1 < id2 { (id1, id2) } else { (id2, id1) };
 
-                if is_mega {
                     mega_paper_stats.total_pairs += 1;
 
-                    // Check bloom first (cheap)
-                    if context.edge_cache.cold_bloom.check(&key) {
-                        mega_paper_stats.bloom_hits += 1;
-                        // Check cache second (more expensive)
-                        if context.edge_cache.get(key).is_some() {
-                            mega_paper_stats.cache_hits += 1;
+                    if batch_edge_bloom.check(&key) {
+                        *batch_edge_weights.entry(key).or_insert(0) += 1;
+                    } else {
+                        // Only check bloom/cache for new edges
+                        if context.edge_cache.cold_bloom.check(&key) {
+                            mega_paper_stats.bloom_hits += 1;
+                            if context.edge_cache.get(key).is_some() {
+                                mega_paper_stats.cache_hits += 1;
+                            }
                         }
+                        batch_edge_bloom.set(&key);
+                        batch_edge_weights.insert(key, 1);
                     }
                 }
+            }
+        } else {
+            // Fast path for normal papers without statistics overhead
+            for i in 0..authors.len() {
+                for j in (i + 1)..authors.len() {
+                    let id1 = authors[i].id.as_u128();
+                    let id2 = authors[j].id.as_u128();
+                    let key = if id1 < id2 { (id1, id2) } else { (id2, id1) };
 
-                if batch_edge_bloom.check(&key) {
-                    *batch_edge_weights.entry(key).or_insert(0) += 1;
-                } else {
-                    batch_edge_bloom.set(&key);
-                    batch_edge_weights.insert(key, 1);
+                    if batch_edge_bloom.check(&key) {
+                        *batch_edge_weights.entry(key).or_insert(0) += 1;
+                    } else {
+                        batch_edge_bloom.set(&key);
+                        batch_edge_weights.insert(key, 1);
+                    }
                 }
             }
         }

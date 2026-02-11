@@ -791,4 +791,267 @@ mod tests {
         assert!(queue.producers_finished());
         assert!(queue_clone.producers_finished());
     }
+
+    #[test]
+    fn test_queue_size_with_concurrent_operations() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let queue_clone = queue.clone();
+
+        let producer = thread::spawn(move || {
+            for i in 0..50 {
+                queue_clone
+                    .enqueue(create_test_record(&i.to_string()))
+                    .unwrap();
+            }
+        });
+
+        producer.join().unwrap();
+        assert_eq!(queue.queue_size(), 50);
+    }
+
+    #[test]
+    fn test_dequeue_returns_none_consistently_when_empty() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        for _ in 0..100 {
+            assert_eq!(queue.dequeue(), None);
+        }
+    }
+
+    #[test]
+    fn test_producer_submit_with_error_recovery() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+
+        // Submit should work normally
+        for i in 0..10 {
+            let result = producer.submit(create_test_record(&i.to_string()));
+            assert!(result.is_ok());
+        }
+
+        assert_eq!(queue.queue_size(), 10);
+    }
+
+    #[test]
+    fn test_queue_maintains_fifo_under_stress() {
+        let queue = ThreadSafeQueue::new(QueueConfig {
+            max_queue_size: 1000,
+        });
+
+        // Enqueue many items
+        for i in 0..500 {
+            queue.enqueue(create_test_record(&i.to_string())).unwrap();
+        }
+
+        // Dequeue and verify order
+        for i in 0..500 {
+            let item = queue.dequeue().unwrap();
+            assert_eq!(item.id, i.to_string());
+        }
+    }
+
+    #[test]
+    fn test_multiple_producers_and_consumers() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let num_items = 100;
+
+        // Multiple producers
+        let mut producer_handles = vec![];
+        for producer_id in 0..3 {
+            let q = queue.clone();
+            let handle = thread::spawn(move || {
+                for i in 0..num_items {
+                    q.enqueue(create_test_record(&format!("p{}-{}", producer_id, i)))
+                        .unwrap();
+                }
+            });
+            producer_handles.push(handle);
+        }
+
+        // Multiple consumers
+        let consumed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut consumer_handles = vec![];
+        for _ in 0..3 {
+            let q = queue.clone();
+            let count = consumed_count.clone();
+            let handle = thread::spawn(move || {
+                loop {
+                    if q.dequeue().is_some() {
+                        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    } else if count.load(std::sync::atomic::Ordering::SeqCst) >= num_items * 3 {
+                        break;
+                    }
+                }
+            });
+            consumer_handles.push(handle);
+        }
+
+        // Wait for producers
+        for handle in producer_handles {
+            handle.join().unwrap();
+        }
+
+        // Wait for consumers
+        for handle in consumer_handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(
+            consumed_count.load(std::sync::atomic::Ordering::SeqCst),
+            num_items * 3
+        );
+    }
+
+    #[test]
+    fn test_config_debug_trait() {
+        let config = QueueConfig {
+            max_queue_size: 500,
+        };
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("500"));
+    }
+
+    #[test]
+    fn test_enqueue_after_producers_finished() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        {
+            let _p = queue.create_producer();
+        }
+
+        // Producers finished
+        assert!(queue.producers_finished());
+
+        // Can still enqueue
+        let result = queue.enqueue(create_test_record("after-finish"));
+        assert!(result.is_ok());
+        assert_eq!(queue.queue_size(), 1);
+    }
+
+    #[test]
+    fn test_queue_with_large_max_size() {
+        let config = QueueConfig {
+            max_queue_size: 1_000_000,
+        };
+        let queue = ThreadSafeQueue::new(config);
+
+        queue.enqueue(create_test_record("large-config")).unwrap();
+        assert_eq!(queue.queue_size(), 1);
+    }
+
+    #[test]
+    fn test_producer_drop_multiple_times() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        let p1 = queue.create_producer();
+        let p2 = queue.create_producer();
+        let p3 = queue.create_producer();
+
+        assert_eq!(queue.active_producer_count(), 3);
+
+        drop(p1);
+        drop(p2);
+        assert_eq!(queue.active_producer_count(), 1);
+        assert!(!queue.producers_finished());
+
+        drop(p3);
+        assert_eq!(queue.active_producer_count(), 0);
+        assert!(queue.producers_finished());
+    }
+
+    #[test]
+    fn test_queue_operations_with_different_record_data() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+
+        let record1 = PublicationRecord {
+            id: "id1".to_string(),
+            title: "Title 1".to_string(),
+            authors: vec!["Author 1".to_string()],
+            year: 2020,
+            venue: Some("Venue 1".to_string()),
+            source: "source1".to_string(),
+        };
+
+        let record2 = PublicationRecord {
+            id: "id2".to_string(),
+            title: "Title 2".to_string(),
+            authors: vec!["Author 2".to_string(), "Author 3".to_string()],
+            year: 2021,
+            venue: None,
+            source: "source2".to_string(),
+        };
+
+        queue.enqueue(record1.clone()).unwrap();
+        queue.enqueue(record2.clone()).unwrap();
+
+        let dequeued1 = queue.dequeue().unwrap();
+        assert_eq!(dequeued1.id, "id1");
+        assert_eq!(dequeued1.year, 2020);
+        assert_eq!(dequeued1.venue, Some("Venue 1".to_string()));
+
+        let dequeued2 = queue.dequeue().unwrap();
+        assert_eq!(dequeued2.id, "id2");
+        assert_eq!(dequeued2.authors.len(), 2);
+        assert_eq!(dequeued2.venue, None);
+    }
+
+    #[test]
+    fn test_notifies_work_correctly() {
+        let config = QueueConfig { max_queue_size: 2 };
+        let queue = ThreadSafeQueue::new(config);
+
+        queue.enqueue(create_test_record("1")).unwrap();
+        queue.enqueue(create_test_record("2")).unwrap();
+
+        let q_clone = queue.clone();
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            q_clone.dequeue();
+        });
+
+        // This should block until space is available
+        let q_clone2 = queue.clone();
+        let enqueue_handle = thread::spawn(move || {
+            q_clone2.enqueue(create_test_record("3")).unwrap();
+        });
+
+        handle.join().unwrap();
+        enqueue_handle.join().unwrap();
+
+        assert_eq!(queue.queue_size(), 2);
+    }
+
+    #[test]
+    fn test_saturating_sub_behavior() {
+        let queue: ThreadSafeQueue<PublicationRecord> =
+            ThreadSafeQueue::new(QueueConfig::default());
+
+        // Unregister without register (saturating_sub should prevent underflow)
+        queue.unregister_producer();
+        assert_eq!(queue.active_producer_count(), 0);
+
+        // Multiple unregisters
+        queue.unregister_producer();
+        queue.unregister_producer();
+        assert_eq!(queue.active_producer_count(), 0);
+    }
+
+    #[test]
+    fn test_empty_queue_after_many_operations() {
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+
+        for i in 0..1000 {
+            queue.enqueue(create_test_record(&i.to_string())).unwrap();
+        }
+
+        for _ in 0..1000 {
+            queue.dequeue();
+        }
+
+        assert_eq!(queue.queue_size(), 0);
+        assert_eq!(queue.dequeue(), None);
+    }
 }
