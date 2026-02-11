@@ -579,153 +579,61 @@ pub async fn scrape_range_xml(
 
     let client = Client::new();
 
-    // Find the most recent available snapshot (DBLP publishes with a delay)
-    let (latest_year, latest_month) = find_latest_available_snapshot(&client, &config.xml_base_url).await?;
-    
-    logger::info(&format!(
-        "Latest available DBLP snapshot: {}-{:02}",
-        latest_year, latest_month
-    ));
+    // Use the main dblp.xml.gz dump instead of monthly snapshots
+    // This is more efficient: download once (~1GB) instead of multiple monthly files
+    let url = format!("{}/dblp.xml.gz", config.xml_base_url);
+    let filename = "dblp.xml.gz".to_string();
+    let filepath = download_dir.join(&filename);
 
-    // Generate list of monthly snapshots to download, capped at latest available
-    let mut snapshots = Vec::new();
-    
-    for year in start_year..=end_year {
-        let month_start = if year == start_year { start_month } else { 1 };
-        let month_end = if year == end_year { end_month } else { 12 };
-        
-        for month in month_start..=month_end {
-            // Only include snapshots that are available (not in the future)
-            if year < latest_year || (year == latest_year && month <= latest_month) {
-                snapshots.push((year, month));
+    logger::info(&format!(
+        "XML mode: Downloading main DBLP dump and filtering for date range {}-{:02} to {}-{:02}",
+        start_year, start_month, end_year, end_month
+    ));
+    logger::info(&format!("Downloading XML dump: {}", url));
+
+    // Download the file
+    match download_file(&client, &url, &filepath).await {
+        Ok(_) => {
+            logger::info(&format!("Successfully downloaded: {}", filename));
+            
+            // Parse the XML file
+            logger::info(&format!("Parsing XML file: {}", filename));
+            match parse_xml_dump(&filepath, start_date, end_date, &producer) {
+                Ok(count) => {
+                    logger::info(&format!(
+                        "Parsed {} records from {}",
+                        count, filename
+                    ));
+                }
+                Err(e) => {
+                    logger::error(&format!("Failed to parse {}: {}", filename, e));
+                }
+            }
+
+            // Delete the file to save space
+            if let Err(e) = fs::remove_file(&filepath) {
+                logger::warn(&format!("Failed to delete {}: {}", filename, e));
             } else {
-                logger::warn(&format!(
-                    "Skipping {}-{:02} snapshot (not yet published, latest is {}-{:02})",
-                    year, month, latest_year, latest_month
-                ));
+                logger::debug(&format!("Deleted temporary file: {}", filename));
             }
         }
-    }
-
-    if snapshots.is_empty() {
-        logger::warn("No DBLP snapshots available for the requested date range");
-        return Ok(());
-    }
-
-    logger::info(&format!(
-        "XML mode: Processing {} monthly snapshots from {}-{:02} to {}-{:02}",
-        snapshots.len(),
-        snapshots[0].0,
-        snapshots[0].1,
-        snapshots[snapshots.len() - 1].0,
-        snapshots[snapshots.len() - 1].1
-    ));
-
-    // Process each monthly snapshot
-    for (year, month) in snapshots {
-        let url = format!(
-            "{}/release/dblp-{:04}-{:02}-01.xml.gz",
-            config.xml_base_url, year, month
-        );
-        
-        let filename = format!("dblp-{:04}-{:02}-01.xml.gz", year, month);
-        let filepath = download_dir.join(&filename);
-
-        logger::info(&format!("Downloading XML snapshot: {}", url));
-
-        // Download the file
-        match download_file(&client, &url, &filepath).await {
-            Ok(_) => {
-                logger::info(&format!("Successfully downloaded: {}", filename));
-                
-                // Parse the XML file
-                logger::info(&format!("Parsing XML file: {}", filename));
-                match parse_xml_dump(&filepath, start_date, end_date, &producer) {
-                    Ok(count) => {
-                        logger::info(&format!(
-                            "Parsed {} records from {}",
-                            count, filename
-                        ));
-                    }
-                    Err(e) => {
-                        logger::error(&format!("Failed to parse {}: {}", filename, e));
-                    }
-                }
-
-                // Delete the file to save space
-                if let Err(e) = fs::remove_file(&filepath) {
-                    logger::warn(&format!("Failed to delete {}: {}", filename, e));
-                } else {
-                    logger::debug(&format!("Deleted temporary file: {}", filename));
-                }
-            }
-            Err(e) => {
-                logger::error(&format!("Failed to download {}: {}", url, e));
-                // Continue with next snapshot instead of failing completely
-                continue;
-            }
+        Err(e) => {
+            return Err(format!("Failed to download main DBLP dump: {}", e).into());
         }
     }
 
     Ok(())
 }
 
-/// Finds the most recent available DBLP XML snapshot by checking recent months.
-///
-/// DBLP publishes monthly snapshots with a delay, so we need to find which
-/// month is actually available rather than assuming the current month exists.
-async fn find_latest_available_snapshot(
-    client: &Client,
-    base_url: &str,
-) -> Result<(i32, u32), Box<dyn std::error::Error>> {
-    let now = Utc::now();
-
-    // Check the last 6 months to find the most recent available snapshot
-    for months_back in 0..6 {
-        let check_date = now - chrono::Duration::days(months_back * 30);
-        let year = check_date.year();
-        let month = check_date.month();
-
-        let url = format!("{}/release/dblp-{:04}-{:02}-01.xml.gz", base_url, year, month);
-        
-        logger::debug(&format!("Checking for snapshot: {}", url));
-        
-        // Try a HEAD request first to check if the file exists
-        match tokio::time::timeout(
-            Duration::from_secs(10),
-            client.head(&url).send()
-        ).await {
-            Ok(Ok(response)) if response.status().is_success() => {
-                logger::info(&format!("Found available snapshot: {}-{:02}", year, month));
-                return Ok((year, month));
-            }
-            _ => {
-                logger::debug(&format!("Snapshot {}-{:02} not available", year, month));
-                continue;
-            }
-        }
-    }
-
-    // If we can't find any recent snapshot, fall back to 2 months ago
-    // (DBLP typically has a 1-2 month delay)
-    let fallback_date = now - chrono::Duration::days(60);
-    let year = fallback_date.year();
-    let month = fallback_date.month();
-    
-    logger::warn(&format!(
-        "Could not verify available snapshots, falling back to {}-{:02}",
-        year, month
-    ));
-    
-    Ok((year, month))
-}
-
-/// Downloads a file from a URL to a local path.
+/// Downloads a file from a URL to a local path with progress logging.
 async fn download_file(
     client: &Client,
     url: &str,
     filepath: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use tokio::io::AsyncWriteExt;
+    use futures::StreamExt;
+    
     // Add timeout to prevent hanging
     let response = tokio::time::timeout(
         Duration::from_secs(300), // 5 minute timeout for large files
@@ -736,13 +644,58 @@ async fn download_file(
         return Err(format!("HTTP error: {}", response.status()).into());
     }
 
-    // Also add timeout for downloading the body
-    let bytes = tokio::time::timeout(
-        Duration::from_secs(600), // 10 minute timeout for downloading
-        response.bytes()
-    ).await??;
+    // Get content length if available
+    let total_size = response.content_length();
+    if let Some(size) = total_size {
+        logger::debug(&format!("Download size: {:.2} MB", size as f64 / 1_048_576.0));
+    }
+
+    // Stream the download with progress updates
+    let mut file = tokio::fs::File::create(filepath).await?;
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
+    let mut last_log_time = std::time::Instant::now();
+    let mut last_log_bytes = 0u64;
     
-    fs::write(filepath, bytes)?;
+    while let Some(chunk_result) = tokio::time::timeout(
+        Duration::from_secs(60), // 60 second timeout per chunk
+        stream.next()
+    ).await? {
+        let chunk = chunk_result?;
+        file.write_all(&chunk).await?;
+        downloaded += chunk.len() as u64;
+        
+        // Log progress every 10 seconds or every 100MB
+        let elapsed = last_log_time.elapsed();
+        if elapsed.as_secs() >= 10 || downloaded - last_log_bytes >= 100_000_000 {
+            let speed = (downloaded - last_log_bytes) as f64 / elapsed.as_secs_f64() / 1_048_576.0;
+            if let Some(total) = total_size {
+                let percent = (downloaded as f64 / total as f64) * 100.0;
+                logger::debug(&format!(
+                    "Downloaded {:.2} MB / {:.2} MB ({:.1}%) at {:.2} MB/s",
+                    downloaded as f64 / 1_048_576.0,
+                    total as f64 / 1_048_576.0,
+                    percent,
+                    speed
+                ));
+            } else {
+                logger::debug(&format!(
+                    "Downloaded {:.2} MB at {:.2} MB/s",
+                    downloaded as f64 / 1_048_576.0,
+                    speed
+                ));
+            }
+            last_log_time = std::time::Instant::now();
+            last_log_bytes = downloaded;
+        }
+    }
+    
+    file.flush().await?;
+    
+    logger::debug(&format!(
+        "Download complete: {:.2} MB total",
+        downloaded as f64 / 1_048_576.0
+    ));
     
     Ok(())
 }

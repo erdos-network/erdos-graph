@@ -150,6 +150,7 @@ fn parse_entry_str(
     let mut cur_id: Option<String> = None;
     let mut cur_title: Option<String> = None;
     let mut cur_published: Option<String> = None;
+    let mut cur_updated: Option<String> = None;
     let mut cur_journal_ref: Option<String> = None;
     let mut cur_primary_cat: Option<String> = None;
     let mut cur_authors: Vec<String> = Vec::new();
@@ -192,6 +193,12 @@ fn parse_entry_str(
                             cur_published = Some(normalize_text(&txt));
                         }
                     }
+                    // Capture the last updated timestamp (RFC3339 expected).
+                    b"updated" if inside_entry => {
+                        if let Ok(txt) = reader.read_text(e.name()) {
+                            cur_updated = Some(normalize_text(&txt));
+                        }
+                    }
                     // Capture a `journal_ref` if present; this takes precedence
                     // over primary category for the `venue` field when present.
                     b"journal_ref" if inside_entry => {
@@ -227,15 +234,20 @@ fn parse_entry_str(
                 // build and return a `PublicationRecord` populated from the
                 // fields we've accumulated.
                 if e.local_name().as_ref() == b"entry" {
-                    // Check if published date is valid and within range
-                    let published_str = cur_published.as_ref()?;
-                    let published_dt = DateTime::parse_from_rfc3339(published_str).ok()?;
-                    let published_utc = published_dt.with_timezone(&Utc);
+                    // Use updated date for filtering (since we query by lastUpdatedDate)
+                    // but fall back to published date if updated is not available
+                    let date_str = cur_updated.as_ref().or(cur_published.as_ref())?;
+                    let date_dt = DateTime::parse_from_rfc3339(date_str).ok()?;
+                    let date_utc = date_dt.with_timezone(&Utc);
 
-                    if published_utc < start_date || published_utc >= end_date {
+                    if date_utc < start_date || date_utc >= end_date {
                         return None;
                     }
 
+                    // For the year field, use the published date (not updated)
+                    let published_str = cur_published.as_ref()?;
+                    let published_dt = DateTime::parse_from_rfc3339(published_str).ok()?;
+                    let published_utc = published_dt.with_timezone(&Utc);
                     let year = published_utc.year() as u32;
 
                     return Some(PublicationRecord {

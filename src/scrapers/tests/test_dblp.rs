@@ -971,9 +971,9 @@ mod tests {
         encoder.write_all(xml_content.as_bytes()).unwrap();
         let compressed = encoder.finish().unwrap();
 
-        // Mock the XML download endpoint
+        // Mock the XML download endpoint (now using main dump instead of monthly snapshots)
         let _mock = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .mock("GET", "/dblp.xml.gz")
             .with_status(200)
             .with_body(compressed)
             .create_async()
@@ -1057,7 +1057,7 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let _mock = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .mock("GET", "/dblp.xml.gz")
             .with_status(200)
             .with_body(compressed)
             .create_async()
@@ -1136,7 +1136,7 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let _mock = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .mock("GET", "/dblp.xml.gz")
             .with_status(200)
             .with_body(compressed)
             .create_async()
@@ -1181,27 +1181,18 @@ mod tests {
         let xml_download_dir = temp_dir.path().join("xml_downloads");
         let mut server = Server::new_async().await;
 
-        // Create XML for January
-        let xml_jan = r#"<?xml version="1.0" encoding="UTF-8"?>
+        // Create XML with records from both January and February
+        // (Now we download the full dump once and filter by date)
+        let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE dblp SYSTEM "dblp.dtd">
 <dblp>
-<article key="journals/test/jan">
+<article key="journals/test/jan" mdate="2023-01-15">
 <author>January Author</author>
 <title>January Paper</title>
 <year>2023</year>
 <journal>Test Journal</journal>
 </article>
-</dblp>"#;
-
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(xml_jan.as_bytes()).unwrap();
-        let compressed_jan = encoder.finish().unwrap();
-
-        // Create XML for February
-        let xml_feb = r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE dblp SYSTEM "dblp.dtd">
-<dblp>
-<article key="journals/test/feb">
+<article key="journals/test/feb" mdate="2023-02-15">
 <author>February Author</author>
 <title>February Paper</title>
 <year>2023</year>
@@ -1210,20 +1201,13 @@ mod tests {
 </dblp>"#;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(xml_feb.as_bytes()).unwrap();
-        let compressed_feb = encoder.finish().unwrap();
+        encoder.write_all(xml_content.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
 
-        let _mock_jan = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+        let _mock = server
+            .mock("GET", "/dblp.xml.gz")
             .with_status(200)
-            .with_body(compressed_jan)
-            .create_async()
-            .await;
-
-        let _mock_feb = server
-            .mock("GET", "/release/dblp-2023-02-01.xml.gz")
-            .with_status(200)
-            .with_body(compressed_feb)
+            .with_body(compressed)
             .create_async()
             .await;
 
@@ -1268,7 +1252,7 @@ mod tests {
 
         // Mock returns 404
         let _mock = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .mock("GET", "/dblp.xml.gz")
             .with_status(404)
             .create_async()
             .await;
@@ -1326,7 +1310,7 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let _mock = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .mock("GET", "/dblp.xml.gz")
             .with_status(200)
             .with_body(compressed)
             .create_async()
@@ -1383,7 +1367,7 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let _mock = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .mock("GET", "/dblp.xml.gz")
             .with_status(200)
             .with_body(compressed)
             .create_async()
@@ -1463,7 +1447,7 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let _mock = server
-            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .mock("GET", "/dblp.xml.gz")
             .with_status(200)
             .with_body(compressed)
             .create_async()
