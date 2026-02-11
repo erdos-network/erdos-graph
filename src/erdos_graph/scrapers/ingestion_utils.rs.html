@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/scrapers/ingestion_utils.rs`."><title>ingestion_utils.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="erdos_graph" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (18d13b533 2026-02-09)" data-channel="nightly" data-search-js="search-fb33671b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-f9617a14.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">erdos_graph/scrapers/</div>ingestion_utils.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span><span class="kw">crate</span>::config::Config;
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/scrapers/ingestion_utils.rs`."><title>ingestion_utils.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="erdos_graph" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (9e79395f9 2026-02-10)" data-channel="nightly" data-search-js="search-fb33671b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-f9617a14.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">erdos_graph/scrapers/</div>ingestion_utils.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span><span class="kw">crate</span>::config::Config;
 <a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span><span class="kw">crate</span>::db::ingestion::PublicationRecord;
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span><span class="kw">crate</span>::db::schema::{GraphEdge, GraphVertex};
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span><span class="kw">crate</span>::logger;
@@ -306,348 +306,368 @@
 <a href=#306 id=306 data-nosnippet>306</a>}
 <a href=#307 id=307 data-nosnippet>307</a>
 <a href=#308 id=308 data-nosnippet>308</a><span class="doccomment">/// Bulk prefetch co-author edges for a set of authors to warm the cache.
-<a href=#309 id=309 data-nosnippet>309</a></span><span class="kw">fn </span>bulk_prefetch_author_edges(
-<a href=#310 id=310 data-nosnippet>310</a>    author_ids: <span class="kw-2">&amp;</span>HashSet&lt;u128&gt;,
-<a href=#311 id=311 data-nosnippet>311</a>    engine: <span class="kw-2">&amp;</span>Arc&lt;HelixGraphEngine&gt;,
-<a href=#312 id=312 data-nosnippet>312</a>    edge_cache: <span class="kw-2">&amp;mut </span>EdgeCacheSystem,
-<a href=#313 id=313 data-nosnippet>313</a>    max_edges_per_author: usize,
-<a href=#314 id=314 data-nosnippet>314</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
-<a href=#315 id=315 data-nosnippet>315</a>    <span class="kw">if </span>author_ids.is_empty() {
-<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#317 id=317 data-nosnippet>317</a>    }
-<a href=#318 id=318 data-nosnippet>318</a>
-<a href=#319 id=319 data-nosnippet>319</a>    <span class="kw">let </span>txn = engine.storage.graph_env.read_txn()<span class="question-mark">?</span>;
-<a href=#320 id=320 data-nosnippet>320</a>    <span class="kw">let </span>arena = Bump::new();
-<a href=#321 id=321 data-nosnippet>321</a>
-<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">use </span><span class="kw">crate</span>::db::schema::COAUTHORED_WITH_TYPE;
-<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">let </span>label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, <span class="prelude-val">None</span>);
-<a href=#324 id=324 data-nosnippet>324</a>
-<a href=#325 id=325 data-nosnippet>325</a>    <span class="kw">for </span><span class="kw-2">&amp;</span>author_id <span class="kw">in </span>author_ids {
-<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw">let </span>out_key = HelixGraphStorage::out_edge_key(<span class="kw-2">&amp;</span>author_id, <span class="kw-2">&amp;</span>label_hash);
-<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">let </span><span class="kw-2">mut </span>edges_processed = <span class="number">0</span>;
+<a href=#309 id=309 data-nosnippet>309</a>/// Uses a limit on total authors to avoid expensive prefetches for mega-paper batches.
+<a href=#310 id=310 data-nosnippet>310</a></span><span class="kw">fn </span>bulk_prefetch_author_edges(
+<a href=#311 id=311 data-nosnippet>311</a>    author_ids: <span class="kw-2">&amp;</span>HashSet&lt;u128&gt;,
+<a href=#312 id=312 data-nosnippet>312</a>    engine: <span class="kw-2">&amp;</span>Arc&lt;HelixGraphEngine&gt;,
+<a href=#313 id=313 data-nosnippet>313</a>    edge_cache: <span class="kw-2">&amp;mut </span>EdgeCacheSystem,
+<a href=#314 id=314 data-nosnippet>314</a>    max_edges_per_author: usize,
+<a href=#315 id=315 data-nosnippet>315</a>    max_authors_to_prefetch: usize,
+<a href=#316 id=316 data-nosnippet>316</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
+<a href=#317 id=317 data-nosnippet>317</a>    <span class="kw">if </span>author_ids.is_empty() {
+<a href=#318 id=318 data-nosnippet>318</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#319 id=319 data-nosnippet>319</a>    }
+<a href=#320 id=320 data-nosnippet>320</a>
+<a href=#321 id=321 data-nosnippet>321</a>    <span class="kw">let </span>txn = engine.storage.graph_env.read_txn()<span class="question-mark">?</span>;
+<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">let </span>arena = Bump::new();
+<a href=#323 id=323 data-nosnippet>323</a>
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">use </span><span class="kw">crate</span>::db::schema::COAUTHORED_WITH_TYPE;
+<a href=#325 id=325 data-nosnippet>325</a>    <span class="kw">let </span>label_hash = helix_db::utils::label_hash::hash_label(COAUTHORED_WITH_TYPE, <span class="prelude-val">None</span>);
+<a href=#326 id=326 data-nosnippet>326</a>
+<a href=#327 id=327 data-nosnippet>327</a>    <span class="kw">let </span>authors_to_process = author_ids.iter().take(max_authors_to_prefetch);
 <a href=#328 id=328 data-nosnippet>328</a>
-<a href=#329 id=329 data-nosnippet>329</a>        <span class="kw">if let </span><span class="prelude-val">Ok</span>(iter) = engine.storage.out_edges_db.prefix_iter(<span class="kw-2">&amp;</span>txn, <span class="kw-2">&amp;</span>out_key) {
-<a href=#330 id=330 data-nosnippet>330</a>            <span class="kw">for </span>(<span class="kw">_</span>, val_bytes) <span class="kw">in </span>iter.flatten() {
-<a href=#331 id=331 data-nosnippet>331</a>                <span class="kw">if </span>edges_processed &gt;= max_edges_per_author {
-<a href=#332 id=332 data-nosnippet>332</a>                    <span class="kw">break</span>;
-<a href=#333 id=333 data-nosnippet>333</a>                }
-<a href=#334 id=334 data-nosnippet>334</a>                edges_processed += <span class="number">1</span>;
-<a href=#335 id=335 data-nosnippet>335</a>
-<a href=#336 id=336 data-nosnippet>336</a>                <span class="kw">if </span>val_bytes.len() &gt;= <span class="number">32 </span>{
-<a href=#337 id=337 data-nosnippet>337</a>                    <span class="kw">let </span><span class="kw-2">mut </span>to_node_bytes = [<span class="number">0u8</span>; <span class="number">16</span>];
-<a href=#338 id=338 data-nosnippet>338</a>                    to_node_bytes.copy_from_slice(<span class="kw-2">&amp;</span>val_bytes[<span class="number">16</span>..<span class="number">32</span>]);
-<a href=#339 id=339 data-nosnippet>339</a>                    <span class="kw">let </span>to_node_id = u128::from_be_bytes(to_node_bytes);
-<a href=#340 id=340 data-nosnippet>340</a>
-<a href=#341 id=341 data-nosnippet>341</a>                    <span class="kw">let </span><span class="kw-2">mut </span>edge_id_bytes = [<span class="number">0u8</span>; <span class="number">16</span>];
-<a href=#342 id=342 data-nosnippet>342</a>                    edge_id_bytes.copy_from_slice(<span class="kw-2">&amp;</span>val_bytes[<span class="number">0</span>..<span class="number">16</span>]);
-<a href=#343 id=343 data-nosnippet>343</a>                    <span class="kw">let </span>edge_id = u128::from_be_bytes(edge_id_bytes);
+<a href=#329 id=329 data-nosnippet>329</a>    <span class="kw">for </span><span class="kw-2">&amp;</span>author_id <span class="kw">in </span>authors_to_process {
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="kw">let </span>out_key = HelixGraphStorage::out_edge_key(<span class="kw-2">&amp;</span>author_id, <span class="kw-2">&amp;</span>label_hash);
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="kw">let </span><span class="kw-2">mut </span>edges_processed = <span class="number">0</span>;
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a>        <span class="kw">if let </span><span class="prelude-val">Ok</span>(iter) = engine.storage.out_edges_db.prefix_iter(<span class="kw-2">&amp;</span>txn, <span class="kw-2">&amp;</span>out_key) {
+<a href=#334 id=334 data-nosnippet>334</a>            <span class="kw">for </span>(<span class="kw">_</span>, val_bytes) <span class="kw">in </span>iter.flatten() {
+<a href=#335 id=335 data-nosnippet>335</a>                <span class="kw">if </span>edges_processed &gt;= max_edges_per_author {
+<a href=#336 id=336 data-nosnippet>336</a>                    <span class="kw">break</span>;
+<a href=#337 id=337 data-nosnippet>337</a>                }
+<a href=#338 id=338 data-nosnippet>338</a>                edges_processed += <span class="number">1</span>;
+<a href=#339 id=339 data-nosnippet>339</a>
+<a href=#340 id=340 data-nosnippet>340</a>                <span class="kw">if </span>val_bytes.len() &gt;= <span class="number">32 </span>{
+<a href=#341 id=341 data-nosnippet>341</a>                    <span class="kw">let </span><span class="kw-2">mut </span>to_node_bytes = [<span class="number">0u8</span>; <span class="number">16</span>];
+<a href=#342 id=342 data-nosnippet>342</a>                    to_node_bytes.copy_from_slice(<span class="kw-2">&amp;</span>val_bytes[<span class="number">16</span>..<span class="number">32</span>]);
+<a href=#343 id=343 data-nosnippet>343</a>                    <span class="kw">let </span>to_node_id = u128::from_be_bytes(to_node_bytes);
 <a href=#344 id=344 data-nosnippet>344</a>
-<a href=#345 id=345 data-nosnippet>345</a>                    <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(edge_bytes)) = engine.storage.edges_db.get(<span class="kw-2">&amp;</span>txn, <span class="kw-2">&amp;</span>edge_id)
-<a href=#346 id=346 data-nosnippet>346</a>                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Ok</span>(edge) = Edge::from_bincode_bytes(edge_id, edge_bytes, <span class="kw-2">&amp;</span>arena)
-<a href=#347 id=347 data-nosnippet>347</a>                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(props) = edge.properties
-<a href=#348 id=348 data-nosnippet>348</a>                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(w_val) = props.get(<span class="string">"weight"</span>)
-<a href=#349 id=349 data-nosnippet>349</a>                    {
-<a href=#350 id=350 data-nosnippet>350</a>                        <span class="kw">let </span>weight = <span class="kw">match </span>w_val {
-<a href=#351 id=351 data-nosnippet>351</a>                            HelixValue::U64(w) =&gt; <span class="kw-2">*</span>w,
-<a href=#352 id=352 data-nosnippet>352</a>                            HelixValue::I64(w) =&gt; <span class="kw-2">*</span>w <span class="kw">as </span>u64,
-<a href=#353 id=353 data-nosnippet>353</a>                            HelixValue::F64(w) =&gt; <span class="kw-2">*</span>w <span class="kw">as </span>u64,
-<a href=#354 id=354 data-nosnippet>354</a>                            <span class="kw">_ </span>=&gt; <span class="number">1</span>,
-<a href=#355 id=355 data-nosnippet>355</a>                        };
-<a href=#356 id=356 data-nosnippet>356</a>
-<a href=#357 id=357 data-nosnippet>357</a>                        <span class="kw">let </span>key = <span class="kw">if </span>author_id &lt; to_node_id {
-<a href=#358 id=358 data-nosnippet>358</a>                            (author_id, to_node_id)
-<a href=#359 id=359 data-nosnippet>359</a>                        } <span class="kw">else </span>{
-<a href=#360 id=360 data-nosnippet>360</a>                            (to_node_id, author_id)
-<a href=#361 id=361 data-nosnippet>361</a>                        };
-<a href=#362 id=362 data-nosnippet>362</a>                        edge_cache.put(key, weight);
-<a href=#363 id=363 data-nosnippet>363</a>                    }
-<a href=#364 id=364 data-nosnippet>364</a>                }
-<a href=#365 id=365 data-nosnippet>365</a>            }
-<a href=#366 id=366 data-nosnippet>366</a>        }
-<a href=#367 id=367 data-nosnippet>367</a>    }
-<a href=#368 id=368 data-nosnippet>368</a>
-<a href=#369 id=369 data-nosnippet>369</a>    <span class="prelude-val">Ok</span>(())
-<a href=#370 id=370 data-nosnippet>370</a>}
-<a href=#371 id=371 data-nosnippet>371</a>
-<a href=#372 id=372 data-nosnippet>372</a><span class="doccomment">/// Ingests a batch of publication records into the database.
-<a href=#373 id=373 data-nosnippet>373</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>ingest_batch(
-<a href=#374 id=374 data-nosnippet>374</a>    records: Vec&lt;PublicationRecord&gt;,
-<a href=#375 id=375 data-nosnippet>375</a>    engine: Arc&lt;HelixGraphEngine&gt;,
-<a href=#376 id=376 data-nosnippet>376</a>    config: <span class="kw-2">&amp;</span>Config,
-<a href=#377 id=377 data-nosnippet>377</a>    context: <span class="kw-2">&amp;mut </span>IngestionContext,
-<a href=#378 id=378 data-nosnippet>378</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
-<a href=#379 id=379 data-nosnippet>379</a>    <span class="kw">let </span>_start = Instant::now();
-<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">if </span>records.is_empty() {
-<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#382 id=382 data-nosnippet>382</a>    }
-<a href=#383 id=383 data-nosnippet>383</a>
-<a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">let </span><span class="kw-2">mut </span>new_records = Vec::with_capacity(records.len());
-<a href=#385 id=385 data-nosnippet>385</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_seen_ids = HashSet::new();
-<a href=#386 id=386 data-nosnippet>386</a>
-<a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">for </span>record <span class="kw">in </span>records {
-<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">if </span>batch_seen_ids.contains(<span class="kw-2">&amp;</span>record.id) {
-<a href=#389 id=389 data-nosnippet>389</a>            <span class="kw">continue</span>;
-<a href=#390 id=390 data-nosnippet>390</a>        }
-<a href=#391 id=391 data-nosnippet>391</a>
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">if </span>!context
-<a href=#393 id=393 data-nosnippet>393</a>            .dedup_cache
-<a href=#394 id=394 data-nosnippet>394</a>            .check_exists_and_cache(<span class="kw-2">&amp;</span>record, <span class="kw-2">&amp;</span>engine, config)
-<a href=#395 id=395 data-nosnippet>395</a>        {
-<a href=#396 id=396 data-nosnippet>396</a>            new_records.push(record.clone());
-<a href=#397 id=397 data-nosnippet>397</a>            batch_seen_ids.insert(record.id.clone());
-<a href=#398 id=398 data-nosnippet>398</a>        }
-<a href=#399 id=399 data-nosnippet>399</a>    }
-<a href=#400 id=400 data-nosnippet>400</a>
-<a href=#401 id=401 data-nosnippet>401</a>    <span class="kw">if </span>new_records.is_empty() {
-<a href=#402 id=402 data-nosnippet>402</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#345 id=345 data-nosnippet>345</a>                    <span class="kw">let </span><span class="kw-2">mut </span>edge_id_bytes = [<span class="number">0u8</span>; <span class="number">16</span>];
+<a href=#346 id=346 data-nosnippet>346</a>                    edge_id_bytes.copy_from_slice(<span class="kw-2">&amp;</span>val_bytes[<span class="number">0</span>..<span class="number">16</span>]);
+<a href=#347 id=347 data-nosnippet>347</a>                    <span class="kw">let </span>edge_id = u128::from_be_bytes(edge_id_bytes);
+<a href=#348 id=348 data-nosnippet>348</a>
+<a href=#349 id=349 data-nosnippet>349</a>                    <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(edge_bytes)) = engine.storage.edges_db.get(<span class="kw-2">&amp;</span>txn, <span class="kw-2">&amp;</span>edge_id)
+<a href=#350 id=350 data-nosnippet>350</a>                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Ok</span>(edge) = Edge::from_bincode_bytes(edge_id, edge_bytes, <span class="kw-2">&amp;</span>arena)
+<a href=#351 id=351 data-nosnippet>351</a>                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(props) = edge.properties
+<a href=#352 id=352 data-nosnippet>352</a>                        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(w_val) = props.get(<span class="string">"weight"</span>)
+<a href=#353 id=353 data-nosnippet>353</a>                    {
+<a href=#354 id=354 data-nosnippet>354</a>                        <span class="kw">let </span>weight = <span class="kw">match </span>w_val {
+<a href=#355 id=355 data-nosnippet>355</a>                            HelixValue::U64(w) =&gt; <span class="kw-2">*</span>w,
+<a href=#356 id=356 data-nosnippet>356</a>                            HelixValue::I64(w) =&gt; <span class="kw-2">*</span>w <span class="kw">as </span>u64,
+<a href=#357 id=357 data-nosnippet>357</a>                            HelixValue::F64(w) =&gt; <span class="kw-2">*</span>w <span class="kw">as </span>u64,
+<a href=#358 id=358 data-nosnippet>358</a>                            <span class="kw">_ </span>=&gt; <span class="number">1</span>,
+<a href=#359 id=359 data-nosnippet>359</a>                        };
+<a href=#360 id=360 data-nosnippet>360</a>
+<a href=#361 id=361 data-nosnippet>361</a>                        <span class="kw">let </span>key = <span class="kw">if </span>author_id &lt; to_node_id {
+<a href=#362 id=362 data-nosnippet>362</a>                            (author_id, to_node_id)
+<a href=#363 id=363 data-nosnippet>363</a>                        } <span class="kw">else </span>{
+<a href=#364 id=364 data-nosnippet>364</a>                            (to_node_id, author_id)
+<a href=#365 id=365 data-nosnippet>365</a>                        };
+<a href=#366 id=366 data-nosnippet>366</a>                        edge_cache.put(key, weight);
+<a href=#367 id=367 data-nosnippet>367</a>                    }
+<a href=#368 id=368 data-nosnippet>368</a>                }
+<a href=#369 id=369 data-nosnippet>369</a>            }
+<a href=#370 id=370 data-nosnippet>370</a>        }
+<a href=#371 id=371 data-nosnippet>371</a>    }
+<a href=#372 id=372 data-nosnippet>372</a>
+<a href=#373 id=373 data-nosnippet>373</a>    <span class="prelude-val">Ok</span>(())
+<a href=#374 id=374 data-nosnippet>374</a>}
+<a href=#375 id=375 data-nosnippet>375</a>
+<a href=#376 id=376 data-nosnippet>376</a><span class="doccomment">/// Ingests a batch of publication records into the database.
+<a href=#377 id=377 data-nosnippet>377</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>ingest_batch(
+<a href=#378 id=378 data-nosnippet>378</a>    records: Vec&lt;PublicationRecord&gt;,
+<a href=#379 id=379 data-nosnippet>379</a>    engine: Arc&lt;HelixGraphEngine&gt;,
+<a href=#380 id=380 data-nosnippet>380</a>    config: <span class="kw-2">&amp;</span>Config,
+<a href=#381 id=381 data-nosnippet>381</a>    context: <span class="kw-2">&amp;mut </span>IngestionContext,
+<a href=#382 id=382 data-nosnippet>382</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
+<a href=#383 id=383 data-nosnippet>383</a>    <span class="kw">let </span>_start = Instant::now();
+<a href=#384 id=384 data-nosnippet>384</a>    <span class="kw">if </span>records.is_empty() {
+<a href=#385 id=385 data-nosnippet>385</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#386 id=386 data-nosnippet>386</a>    }
+<a href=#387 id=387 data-nosnippet>387</a>
+<a href=#388 id=388 data-nosnippet>388</a>    <span class="kw">let </span><span class="kw-2">mut </span>new_records = Vec::with_capacity(records.len());
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_seen_ids = HashSet::new();
+<a href=#390 id=390 data-nosnippet>390</a>
+<a href=#391 id=391 data-nosnippet>391</a>    <span class="kw">for </span>record <span class="kw">in </span>records {
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">if </span>batch_seen_ids.contains(<span class="kw-2">&amp;</span>record.id) {
+<a href=#393 id=393 data-nosnippet>393</a>            <span class="kw">continue</span>;
+<a href=#394 id=394 data-nosnippet>394</a>        }
+<a href=#395 id=395 data-nosnippet>395</a>
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="kw">if </span>!context
+<a href=#397 id=397 data-nosnippet>397</a>            .dedup_cache
+<a href=#398 id=398 data-nosnippet>398</a>            .check_exists_and_cache(<span class="kw-2">&amp;</span>record, <span class="kw-2">&amp;</span>engine, config)
+<a href=#399 id=399 data-nosnippet>399</a>        {
+<a href=#400 id=400 data-nosnippet>400</a>            new_records.push(record.clone());
+<a href=#401 id=401 data-nosnippet>401</a>            batch_seen_ids.insert(record.id.clone());
+<a href=#402 id=402 data-nosnippet>402</a>        }
 <a href=#403 id=403 data-nosnippet>403</a>    }
 <a href=#404 id=404 data-nosnippet>404</a>
-<a href=#405 id=405 data-nosnippet>405</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_authors = HashSet::new();
-<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">for </span>record <span class="kw">in </span><span class="kw-2">&amp;</span>new_records {
-<a href=#407 id=407 data-nosnippet>407</a>        <span class="kw">for </span>author <span class="kw">in </span><span class="kw-2">&amp;</span>record.authors {
-<a href=#408 id=408 data-nosnippet>408</a>            batch_authors.insert(author.clone());
-<a href=#409 id=409 data-nosnippet>409</a>        }
-<a href=#410 id=410 data-nosnippet>410</a>    }
-<a href=#411 id=411 data-nosnippet>411</a>
-<a href=#412 id=412 data-nosnippet>412</a>    <span class="kw">for </span>author <span class="kw">in </span><span class="kw-2">&amp;</span>batch_authors {
-<a href=#413 id=413 data-nosnippet>413</a>        get_or_create_author_vertex(author, <span class="kw-2">&amp;mut </span>context.write_buffer, <span class="kw-2">&amp;mut </span>context.author_cache)<span class="question-mark">?</span>;
+<a href=#405 id=405 data-nosnippet>405</a>    <span class="kw">if </span>new_records.is_empty() {
+<a href=#406 id=406 data-nosnippet>406</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#407 id=407 data-nosnippet>407</a>    }
+<a href=#408 id=408 data-nosnippet>408</a>
+<a href=#409 id=409 data-nosnippet>409</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_authors = HashSet::new();
+<a href=#410 id=410 data-nosnippet>410</a>    <span class="kw">for </span>record <span class="kw">in </span><span class="kw-2">&amp;</span>new_records {
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw">for </span>author <span class="kw">in </span><span class="kw-2">&amp;</span>record.authors {
+<a href=#412 id=412 data-nosnippet>412</a>            batch_authors.insert(author.clone());
+<a href=#413 id=413 data-nosnippet>413</a>        }
 <a href=#414 id=414 data-nosnippet>414</a>    }
 <a href=#415 id=415 data-nosnippet>415</a>
-<a href=#416 id=416 data-nosnippet>416</a>    <span class="kw">let </span><span class="kw-2">mut </span>record_author_vertices: Vec&lt;Vec&lt;GraphVertex&gt;&gt; = Vec::with_capacity(new_records.len());
-<a href=#417 id=417 data-nosnippet>417</a>    <span class="kw">let </span><span class="kw-2">mut </span>all_involved_authors: HashSet&lt;Uuid&gt; = HashSet::new();
-<a href=#418 id=418 data-nosnippet>418</a>
-<a href=#419 id=419 data-nosnippet>419</a>    <span class="kw">for </span>record <span class="kw">in </span><span class="kw-2">&amp;</span>new_records {
-<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw">let </span>pub_vertex = add_publication(record, <span class="kw-2">&amp;mut </span>context.write_buffer)<span class="question-mark">?</span>;
-<a href=#421 id=421 data-nosnippet>421</a>        context.dedup_cache.add(
-<a href=#422 id=422 data-nosnippet>422</a>            record.year,
-<a href=#423 id=423 data-nosnippet>423</a>            pub_vertex.id.to_string(),
-<a href=#424 id=424 data-nosnippet>424</a>            record.title.clone(),
-<a href=#425 id=425 data-nosnippet>425</a>            <span class="kw-2">&amp;</span>record.authors,
-<a href=#426 id=426 data-nosnippet>426</a>            record.id.clone(),
-<a href=#427 id=427 data-nosnippet>427</a>        );
-<a href=#428 id=428 data-nosnippet>428</a>
-<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">let </span><span class="kw-2">mut </span>authors_for_rec = Vec::new();
-<a href=#430 id=430 data-nosnippet>430</a>        <span class="kw">for </span>author_name <span class="kw">in </span><span class="kw-2">&amp;</span>record.authors {
-<a href=#431 id=431 data-nosnippet>431</a>            <span class="kw">let </span>norm = normalize_author(author_name);
-<a href=#432 id=432 data-nosnippet>432</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(v) = context.author_cache.get(<span class="kw-2">&amp;</span>norm) {
-<a href=#433 id=433 data-nosnippet>433</a>                authors_for_rec.push(v.clone());
-<a href=#434 id=434 data-nosnippet>434</a>                all_involved_authors.insert(v.id);
-<a href=#435 id=435 data-nosnippet>435</a>                create_authored_edge(v, <span class="kw-2">&amp;</span>pub_vertex, <span class="kw-2">&amp;mut </span>context.write_buffer)<span class="question-mark">?</span>;
-<a href=#436 id=436 data-nosnippet>436</a>            }
-<a href=#437 id=437 data-nosnippet>437</a>        }
-<a href=#438 id=438 data-nosnippet>438</a>        record_author_vertices.push(authors_for_rec);
-<a href=#439 id=439 data-nosnippet>439</a>    }
-<a href=#440 id=440 data-nosnippet>440</a>
-<a href=#441 id=441 data-nosnippet>441</a>    <span class="kw">use </span>bloomfilter::Bloom;
-<a href=#442 id=442 data-nosnippet>442</a>
-<a href=#443 id=443 data-nosnippet>443</a>    <span class="comment">// Collect all unique authors and identify mega-papers
-<a href=#444 id=444 data-nosnippet>444</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>batch_author_ids: HashSet&lt;u128&gt; = HashSet::new();
-<a href=#445 id=445 data-nosnippet>445</a>    <span class="kw">let </span><span class="kw-2">mut </span>has_mega_paper = <span class="bool-val">false</span>;
-<a href=#446 id=446 data-nosnippet>446</a>    <span class="kw">let </span>mega_threshold = config.ingestion.mega_paper_threshold;
-<a href=#447 id=447 data-nosnippet>447</a>
-<a href=#448 id=448 data-nosnippet>448</a>    <span class="kw">for </span>authors <span class="kw">in </span><span class="kw-2">&amp;</span>record_author_vertices {
-<a href=#449 id=449 data-nosnippet>449</a>        <span class="kw">if </span>authors.len() &gt; mega_threshold {
-<a href=#450 id=450 data-nosnippet>450</a>            has_mega_paper = <span class="bool-val">true</span>;
-<a href=#451 id=451 data-nosnippet>451</a>        }
-<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">for </span>author <span class="kw">in </span>authors {
-<a href=#453 id=453 data-nosnippet>453</a>            batch_author_ids.insert(author.id.as_u128());
-<a href=#454 id=454 data-nosnippet>454</a>        }
-<a href=#455 id=455 data-nosnippet>455</a>    }
-<a href=#456 id=456 data-nosnippet>456</a>
-<a href=#457 id=457 data-nosnippet>457</a>    <span class="comment">// For mega-papers, sample edges to estimate bloom coverage and skip prefetch if high
-<a href=#458 id=458 data-nosnippet>458</a>    </span><span class="kw">let </span>prefetch_start = Instant::now();
-<a href=#459 id=459 data-nosnippet>459</a>    <span class="kw">let </span>skip_prefetch = <span class="kw">if </span>has_mega_paper {
-<a href=#460 id=460 data-nosnippet>460</a>        <span class="kw">let </span><span class="kw-2">mut </span>sample_hits = <span class="number">0</span>;
-<a href=#461 id=461 data-nosnippet>461</a>        <span class="kw">let </span><span class="kw-2">mut </span>sample_total = <span class="number">0</span>;
-<a href=#462 id=462 data-nosnippet>462</a>        <span class="kw">let </span>sample_size = config.ingestion.bloom_sample_size;
-<a href=#463 id=463 data-nosnippet>463</a>        <span class="kw">let </span>sample_authors = (sample_size <span class="kw">as </span>f64).sqrt().ceil() <span class="kw">as </span>usize;
-<a href=#464 id=464 data-nosnippet>464</a>
-<a href=#465 id=465 data-nosnippet>465</a>        <span class="lifetime">'sampling</span>: <span class="kw">for </span>authors <span class="kw">in </span><span class="kw-2">&amp;</span>record_author_vertices {
-<a href=#466 id=466 data-nosnippet>466</a>            <span class="kw">if </span>authors.len() &lt;= mega_threshold {
-<a href=#467 id=467 data-nosnippet>467</a>                <span class="kw">continue</span>;
-<a href=#468 id=468 data-nosnippet>468</a>            }
-<a href=#469 id=469 data-nosnippet>469</a>            <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..authors.len().min(sample_authors) {
-<a href=#470 id=470 data-nosnippet>470</a>                <span class="kw">for </span>j <span class="kw">in </span>(i + <span class="number">1</span>)..authors.len().min(sample_authors) {
-<a href=#471 id=471 data-nosnippet>471</a>                    <span class="kw">let </span>id1 = authors[i].id.as_u128();
-<a href=#472 id=472 data-nosnippet>472</a>                    <span class="kw">let </span>id2 = authors[j].id.as_u128();
-<a href=#473 id=473 data-nosnippet>473</a>                    <span class="kw">let </span>key = <span class="kw">if </span>id1 &lt; id2 { (id1, id2) } <span class="kw">else </span>{ (id2, id1) };
-<a href=#474 id=474 data-nosnippet>474</a>
-<a href=#475 id=475 data-nosnippet>475</a>                    <span class="kw">if </span>context.edge_cache.cold_bloom.check(<span class="kw-2">&amp;</span>key) {
-<a href=#476 id=476 data-nosnippet>476</a>                        sample_hits += <span class="number">1</span>;
-<a href=#477 id=477 data-nosnippet>477</a>                    }
-<a href=#478 id=478 data-nosnippet>478</a>                    sample_total += <span class="number">1</span>;
-<a href=#479 id=479 data-nosnippet>479</a>
-<a href=#480 id=480 data-nosnippet>480</a>                    <span class="kw">if </span>sample_total &gt;= sample_size {
-<a href=#481 id=481 data-nosnippet>481</a>                        <span class="kw">break </span><span class="lifetime">'sampling</span>;
-<a href=#482 id=482 data-nosnippet>482</a>                    }
-<a href=#483 id=483 data-nosnippet>483</a>                }
-<a href=#484 id=484 data-nosnippet>484</a>            }
-<a href=#485 id=485 data-nosnippet>485</a>        }
-<a href=#486 id=486 data-nosnippet>486</a>
-<a href=#487 id=487 data-nosnippet>487</a>        <span class="comment">// Skip prefetch if bloom hit rate exceeds threshold
-<a href=#488 id=488 data-nosnippet>488</a>        </span>sample_total &gt; <span class="number">0
-<a href=#489 id=489 data-nosnippet>489</a>            </span>&amp;&amp; (sample_hits <span class="kw">as </span>f64 / sample_total <span class="kw">as </span>f64)
-<a href=#490 id=490 data-nosnippet>490</a>                &gt; config.ingestion.prefetch_skip_bloom_threshold
-<a href=#491 id=491 data-nosnippet>491</a>    } <span class="kw">else </span>{
-<a href=#492 id=492 data-nosnippet>492</a>        <span class="bool-val">false
-<a href=#493 id=493 data-nosnippet>493</a>    </span>};
-<a href=#494 id=494 data-nosnippet>494</a>
-<a href=#495 id=495 data-nosnippet>495</a>    <span class="kw">if </span>!skip_prefetch
-<a href=#496 id=496 data-nosnippet>496</a>        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Err</span>(e) = bulk_prefetch_author_edges(
-<a href=#497 id=497 data-nosnippet>497</a>            <span class="kw-2">&amp;</span>batch_author_ids,
-<a href=#498 id=498 data-nosnippet>498</a>            <span class="kw-2">&amp;</span>engine,
-<a href=#499 id=499 data-nosnippet>499</a>            <span class="kw-2">&amp;mut </span>context.edge_cache,
-<a href=#500 id=500 data-nosnippet>500</a>            config.ingestion.max_edges_per_author,
-<a href=#501 id=501 data-nosnippet>501</a>        )
-<a href=#502 id=502 data-nosnippet>502</a>    {
-<a href=#503 id=503 data-nosnippet>503</a>        logger::error(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"Failed to bulk prefetch author edges: {}"</span>, e));
-<a href=#504 id=504 data-nosnippet>504</a>    }
-<a href=#505 id=505 data-nosnippet>505</a>    <span class="kw">let </span>prefetch_time = prefetch_start.elapsed().as_millis();
-<a href=#506 id=506 data-nosnippet>506</a>
-<a href=#507 id=507 data-nosnippet>507</a>    <span class="comment">// Generate edge pairs with cache warmed
-<a href=#508 id=508 data-nosnippet>508</a>    </span><span class="kw">let </span>estimated_edges = new_records.len() * config.ingestion.estimated_edges_per_paper;
-<a href=#509 id=509 data-nosnippet>509</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_edge_bloom = Bloom::new_for_fp_rate(estimated_edges, <span class="number">0.01</span>)
-<a href=#510 id=510 data-nosnippet>510</a>        .unwrap_or_else(|<span class="kw">_</span>| Bloom::new_for_fp_rate(<span class="number">10000</span>, <span class="number">0.01</span>).unwrap());
+<a href=#416 id=416 data-nosnippet>416</a>    <span class="kw">for </span>author <span class="kw">in </span><span class="kw-2">&amp;</span>batch_authors {
+<a href=#417 id=417 data-nosnippet>417</a>        get_or_create_author_vertex(author, <span class="kw-2">&amp;mut </span>context.write_buffer, <span class="kw-2">&amp;mut </span>context.author_cache)<span class="question-mark">?</span>;
+<a href=#418 id=418 data-nosnippet>418</a>    }
+<a href=#419 id=419 data-nosnippet>419</a>
+<a href=#420 id=420 data-nosnippet>420</a>    <span class="kw">let </span><span class="kw-2">mut </span>record_author_vertices: Vec&lt;Vec&lt;GraphVertex&gt;&gt; = Vec::with_capacity(new_records.len());
+<a href=#421 id=421 data-nosnippet>421</a>    <span class="kw">let </span><span class="kw-2">mut </span>all_involved_authors: HashSet&lt;Uuid&gt; = HashSet::new();
+<a href=#422 id=422 data-nosnippet>422</a>
+<a href=#423 id=423 data-nosnippet>423</a>    <span class="kw">for </span>record <span class="kw">in </span><span class="kw-2">&amp;</span>new_records {
+<a href=#424 id=424 data-nosnippet>424</a>        <span class="kw">let </span>pub_vertex = add_publication(record, <span class="kw-2">&amp;mut </span>context.write_buffer)<span class="question-mark">?</span>;
+<a href=#425 id=425 data-nosnippet>425</a>        context.dedup_cache.add(
+<a href=#426 id=426 data-nosnippet>426</a>            record.year,
+<a href=#427 id=427 data-nosnippet>427</a>            pub_vertex.id.to_string(),
+<a href=#428 id=428 data-nosnippet>428</a>            record.title.clone(),
+<a href=#429 id=429 data-nosnippet>429</a>            <span class="kw-2">&amp;</span>record.authors,
+<a href=#430 id=430 data-nosnippet>430</a>            record.id.clone(),
+<a href=#431 id=431 data-nosnippet>431</a>        );
+<a href=#432 id=432 data-nosnippet>432</a>
+<a href=#433 id=433 data-nosnippet>433</a>        <span class="kw">let </span><span class="kw-2">mut </span>authors_for_rec = Vec::new();
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">for </span>author_name <span class="kw">in </span><span class="kw-2">&amp;</span>record.authors {
+<a href=#435 id=435 data-nosnippet>435</a>            <span class="kw">let </span>norm = normalize_author(author_name);
+<a href=#436 id=436 data-nosnippet>436</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(v) = context.author_cache.get(<span class="kw-2">&amp;</span>norm) {
+<a href=#437 id=437 data-nosnippet>437</a>                authors_for_rec.push(v.clone());
+<a href=#438 id=438 data-nosnippet>438</a>                all_involved_authors.insert(v.id);
+<a href=#439 id=439 data-nosnippet>439</a>                create_authored_edge(v, <span class="kw-2">&amp;</span>pub_vertex, <span class="kw-2">&amp;mut </span>context.write_buffer)<span class="question-mark">?</span>;
+<a href=#440 id=440 data-nosnippet>440</a>            }
+<a href=#441 id=441 data-nosnippet>441</a>        }
+<a href=#442 id=442 data-nosnippet>442</a>        record_author_vertices.push(authors_for_rec);
+<a href=#443 id=443 data-nosnippet>443</a>    }
+<a href=#444 id=444 data-nosnippet>444</a>
+<a href=#445 id=445 data-nosnippet>445</a>    <span class="kw">use </span>bloomfilter::Bloom;
+<a href=#446 id=446 data-nosnippet>446</a>
+<a href=#447 id=447 data-nosnippet>447</a>    <span class="comment">// Collect all unique authors and identify mega-papers
+<a href=#448 id=448 data-nosnippet>448</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>batch_author_ids: HashSet&lt;u128&gt; = HashSet::new();
+<a href=#449 id=449 data-nosnippet>449</a>    <span class="kw">let </span><span class="kw-2">mut </span>has_mega_paper = <span class="bool-val">false</span>;
+<a href=#450 id=450 data-nosnippet>450</a>    <span class="kw">let </span>mega_threshold = config.ingestion.mega_paper_threshold;
+<a href=#451 id=451 data-nosnippet>451</a>
+<a href=#452 id=452 data-nosnippet>452</a>    <span class="kw">for </span>authors <span class="kw">in </span><span class="kw-2">&amp;</span>record_author_vertices {
+<a href=#453 id=453 data-nosnippet>453</a>        <span class="kw">if </span>authors.len() &gt; mega_threshold {
+<a href=#454 id=454 data-nosnippet>454</a>            has_mega_paper = <span class="bool-val">true</span>;
+<a href=#455 id=455 data-nosnippet>455</a>        }
+<a href=#456 id=456 data-nosnippet>456</a>        <span class="kw">for </span>author <span class="kw">in </span>authors {
+<a href=#457 id=457 data-nosnippet>457</a>            batch_author_ids.insert(author.id.as_u128());
+<a href=#458 id=458 data-nosnippet>458</a>        }
+<a href=#459 id=459 data-nosnippet>459</a>    }
+<a href=#460 id=460 data-nosnippet>460</a>
+<a href=#461 id=461 data-nosnippet>461</a>    <span class="comment">// For mega-papers, sample edges to estimate bloom coverage and skip prefetch if high
+<a href=#462 id=462 data-nosnippet>462</a>    </span><span class="kw">let </span>prefetch_start = Instant::now();
+<a href=#463 id=463 data-nosnippet>463</a>    <span class="kw">let </span>skip_prefetch = <span class="kw">if </span>has_mega_paper {
+<a href=#464 id=464 data-nosnippet>464</a>        <span class="kw">let </span><span class="kw-2">mut </span>sample_hits = <span class="number">0</span>;
+<a href=#465 id=465 data-nosnippet>465</a>        <span class="kw">let </span><span class="kw-2">mut </span>sample_total = <span class="number">0</span>;
+<a href=#466 id=466 data-nosnippet>466</a>        <span class="kw">let </span>sample_size = config.ingestion.bloom_sample_size;
+<a href=#467 id=467 data-nosnippet>467</a>        <span class="kw">let </span>sample_authors = (sample_size <span class="kw">as </span>f64).sqrt().ceil() <span class="kw">as </span>usize;
+<a href=#468 id=468 data-nosnippet>468</a>
+<a href=#469 id=469 data-nosnippet>469</a>        <span class="lifetime">'sampling</span>: <span class="kw">for </span>authors <span class="kw">in </span><span class="kw-2">&amp;</span>record_author_vertices {
+<a href=#470 id=470 data-nosnippet>470</a>            <span class="kw">if </span>authors.len() &lt;= mega_threshold {
+<a href=#471 id=471 data-nosnippet>471</a>                <span class="kw">continue</span>;
+<a href=#472 id=472 data-nosnippet>472</a>            }
+<a href=#473 id=473 data-nosnippet>473</a>            <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..authors.len().min(sample_authors) {
+<a href=#474 id=474 data-nosnippet>474</a>                <span class="kw">for </span>j <span class="kw">in </span>(i + <span class="number">1</span>)..authors.len().min(sample_authors) {
+<a href=#475 id=475 data-nosnippet>475</a>                    <span class="kw">let </span>id1 = authors[i].id.as_u128();
+<a href=#476 id=476 data-nosnippet>476</a>                    <span class="kw">let </span>id2 = authors[j].id.as_u128();
+<a href=#477 id=477 data-nosnippet>477</a>                    <span class="kw">let </span>key = <span class="kw">if </span>id1 &lt; id2 { (id1, id2) } <span class="kw">else </span>{ (id2, id1) };
+<a href=#478 id=478 data-nosnippet>478</a>
+<a href=#479 id=479 data-nosnippet>479</a>                    <span class="kw">if </span>context.edge_cache.cold_bloom.check(<span class="kw-2">&amp;</span>key) {
+<a href=#480 id=480 data-nosnippet>480</a>                        sample_hits += <span class="number">1</span>;
+<a href=#481 id=481 data-nosnippet>481</a>                    }
+<a href=#482 id=482 data-nosnippet>482</a>                    sample_total += <span class="number">1</span>;
+<a href=#483 id=483 data-nosnippet>483</a>
+<a href=#484 id=484 data-nosnippet>484</a>                    <span class="kw">if </span>sample_total &gt;= sample_size {
+<a href=#485 id=485 data-nosnippet>485</a>                        <span class="kw">break </span><span class="lifetime">'sampling</span>;
+<a href=#486 id=486 data-nosnippet>486</a>                    }
+<a href=#487 id=487 data-nosnippet>487</a>                }
+<a href=#488 id=488 data-nosnippet>488</a>            }
+<a href=#489 id=489 data-nosnippet>489</a>        }
+<a href=#490 id=490 data-nosnippet>490</a>
+<a href=#491 id=491 data-nosnippet>491</a>        <span class="comment">// Skip prefetch if bloom hit rate exceeds threshold
+<a href=#492 id=492 data-nosnippet>492</a>        </span>sample_total &gt; <span class="number">0
+<a href=#493 id=493 data-nosnippet>493</a>            </span>&amp;&amp; (sample_hits <span class="kw">as </span>f64 / sample_total <span class="kw">as </span>f64)
+<a href=#494 id=494 data-nosnippet>494</a>                &gt; config.ingestion.prefetch_skip_bloom_threshold
+<a href=#495 id=495 data-nosnippet>495</a>    } <span class="kw">else </span>{
+<a href=#496 id=496 data-nosnippet>496</a>        <span class="bool-val">false
+<a href=#497 id=497 data-nosnippet>497</a>    </span>};
+<a href=#498 id=498 data-nosnippet>498</a>
+<a href=#499 id=499 data-nosnippet>499</a>    <span class="kw">if </span>!skip_prefetch
+<a href=#500 id=500 data-nosnippet>500</a>        &amp;&amp; <span class="kw">let </span><span class="prelude-val">Err</span>(e) = bulk_prefetch_author_edges(
+<a href=#501 id=501 data-nosnippet>501</a>            <span class="kw-2">&amp;</span>batch_author_ids,
+<a href=#502 id=502 data-nosnippet>502</a>            <span class="kw-2">&amp;</span>engine,
+<a href=#503 id=503 data-nosnippet>503</a>            <span class="kw-2">&amp;mut </span>context.edge_cache,
+<a href=#504 id=504 data-nosnippet>504</a>            config.ingestion.max_edges_per_author,
+<a href=#505 id=505 data-nosnippet>505</a>            config.ingestion.max_authors_to_prefetch,
+<a href=#506 id=506 data-nosnippet>506</a>        )
+<a href=#507 id=507 data-nosnippet>507</a>    {
+<a href=#508 id=508 data-nosnippet>508</a>        logger::error(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"Failed to bulk prefetch author edges: {}"</span>, e));
+<a href=#509 id=509 data-nosnippet>509</a>    }
+<a href=#510 id=510 data-nosnippet>510</a>    <span class="kw">let </span>prefetch_time = prefetch_start.elapsed().as_millis();
 <a href=#511 id=511 data-nosnippet>511</a>
-<a href=#512 id=512 data-nosnippet>512</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_edge_weights: HashMap&lt;(u128, u128), u64&gt; = HashMap::new();
-<a href=#513 id=513 data-nosnippet>513</a>
-<a href=#514 id=514 data-nosnippet>514</a>    <span class="comment">// Track statistics for mega-papers
-<a href=#515 id=515 data-nosnippet>515</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>mega_paper_stats = MegaPaperStats::default();
+<a href=#512 id=512 data-nosnippet>512</a>    <span class="comment">// Generate edge pairs with cache warmed
+<a href=#513 id=513 data-nosnippet>513</a>    </span><span class="kw">let </span>estimated_edges = new_records.len() * config.ingestion.estimated_edges_per_paper;
+<a href=#514 id=514 data-nosnippet>514</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_edge_bloom = Bloom::new_for_fp_rate(estimated_edges, <span class="number">0.01</span>)
+<a href=#515 id=515 data-nosnippet>515</a>        .unwrap_or_else(|<span class="kw">_</span>| Bloom::new_for_fp_rate(<span class="number">10000</span>, <span class="number">0.01</span>).unwrap());
 <a href=#516 id=516 data-nosnippet>516</a>
-<a href=#517 id=517 data-nosnippet>517</a>    <span class="kw">let </span>edge_gen_start = Instant::now();
-<a href=#518 id=518 data-nosnippet>518</a>    <span class="kw">for </span>authors <span class="kw">in </span><span class="kw-2">&amp;</span>record_author_vertices {
-<a href=#519 id=519 data-nosnippet>519</a>        <span class="kw">let </span>is_mega = authors.len() &gt; mega_threshold;
-<a href=#520 id=520 data-nosnippet>520</a>
-<a href=#521 id=521 data-nosnippet>521</a>        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..authors.len() {
-<a href=#522 id=522 data-nosnippet>522</a>            <span class="kw">for </span>j <span class="kw">in </span>(i + <span class="number">1</span>)..authors.len() {
-<a href=#523 id=523 data-nosnippet>523</a>                <span class="kw">let </span>id1 = authors[i].id.as_u128();
-<a href=#524 id=524 data-nosnippet>524</a>                <span class="kw">let </span>id2 = authors[j].id.as_u128();
-<a href=#525 id=525 data-nosnippet>525</a>                <span class="kw">let </span>key = <span class="kw">if </span>id1 &lt; id2 { (id1, id2) } <span class="kw">else </span>{ (id2, id1) };
-<a href=#526 id=526 data-nosnippet>526</a>
-<a href=#527 id=527 data-nosnippet>527</a>                <span class="kw">if </span>is_mega {
-<a href=#528 id=528 data-nosnippet>528</a>                    mega_paper_stats.total_pairs += <span class="number">1</span>;
-<a href=#529 id=529 data-nosnippet>529</a>
-<a href=#530 id=530 data-nosnippet>530</a>                    <span class="comment">// Check bloom first (cheap)
-<a href=#531 id=531 data-nosnippet>531</a>                    </span><span class="kw">if </span>context.edge_cache.cold_bloom.check(<span class="kw-2">&amp;</span>key) {
-<a href=#532 id=532 data-nosnippet>532</a>                        mega_paper_stats.bloom_hits += <span class="number">1</span>;
-<a href=#533 id=533 data-nosnippet>533</a>                        <span class="comment">// Check cache second (more expensive)
-<a href=#534 id=534 data-nosnippet>534</a>                        </span><span class="kw">if </span>context.edge_cache.get(key).is_some() {
-<a href=#535 id=535 data-nosnippet>535</a>                            mega_paper_stats.cache_hits += <span class="number">1</span>;
-<a href=#536 id=536 data-nosnippet>536</a>                        }
-<a href=#537 id=537 data-nosnippet>537</a>                    }
-<a href=#538 id=538 data-nosnippet>538</a>                }
-<a href=#539 id=539 data-nosnippet>539</a>
-<a href=#540 id=540 data-nosnippet>540</a>                <span class="kw">if </span>batch_edge_bloom.check(<span class="kw-2">&amp;</span>key) {
-<a href=#541 id=541 data-nosnippet>541</a>                    <span class="kw-2">*</span>batch_edge_weights.entry(key).or_insert(<span class="number">0</span>) += <span class="number">1</span>;
-<a href=#542 id=542 data-nosnippet>542</a>                } <span class="kw">else </span>{
-<a href=#543 id=543 data-nosnippet>543</a>                    batch_edge_bloom.set(<span class="kw-2">&amp;</span>key);
-<a href=#544 id=544 data-nosnippet>544</a>                    batch_edge_weights.insert(key, <span class="number">1</span>);
-<a href=#545 id=545 data-nosnippet>545</a>                }
-<a href=#546 id=546 data-nosnippet>546</a>            }
-<a href=#547 id=547 data-nosnippet>547</a>        }
-<a href=#548 id=548 data-nosnippet>548</a>    }
-<a href=#549 id=549 data-nosnippet>549</a>    <span class="kw">let </span>edge_gen_time = edge_gen_start.elapsed().as_millis();
-<a href=#550 id=550 data-nosnippet>550</a>
-<a href=#551 id=551 data-nosnippet>551</a>    <span class="kw">if </span>has_mega_paper {
-<a href=#552 id=552 data-nosnippet>552</a>        <span class="kw">let </span>bloom_hit_pct = <span class="kw">if </span>mega_paper_stats.total_pairs &gt; <span class="number">0 </span>{
-<a href=#553 id=553 data-nosnippet>553</a>            (mega_paper_stats.bloom_hits <span class="kw">as </span>f64 / mega_paper_stats.total_pairs <span class="kw">as </span>f64) * <span class="number">100.0
-<a href=#554 id=554 data-nosnippet>554</a>        </span>} <span class="kw">else </span>{
-<a href=#555 id=555 data-nosnippet>555</a>            <span class="number">0.0
-<a href=#556 id=556 data-nosnippet>556</a>        </span>};
-<a href=#557 id=557 data-nosnippet>557</a>        <span class="kw">let </span>cache_hit_pct = <span class="kw">if </span>mega_paper_stats.total_pairs &gt; <span class="number">0 </span>{
-<a href=#558 id=558 data-nosnippet>558</a>            (mega_paper_stats.cache_hits <span class="kw">as </span>f64 / mega_paper_stats.total_pairs <span class="kw">as </span>f64) * <span class="number">100.0
-<a href=#559 id=559 data-nosnippet>559</a>        </span>} <span class="kw">else </span>{
-<a href=#560 id=560 data-nosnippet>560</a>            <span class="number">0.0
-<a href=#561 id=561 data-nosnippet>561</a>        </span>};
-<a href=#562 id=562 data-nosnippet>562</a>
-<a href=#563 id=563 data-nosnippet>563</a>        logger::debug(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
-<a href=#564 id=564 data-nosnippet>564</a>            <span class="string">"Mega-paper metrics: {} pairs, bloom hits: {} ({:.1}%), cache hits: {} ({:.1}%), prefetch: {}ms, generation: {}ms"</span>,
-<a href=#565 id=565 data-nosnippet>565</a>            mega_paper_stats.total_pairs,
-<a href=#566 id=566 data-nosnippet>566</a>            mega_paper_stats.bloom_hits,
-<a href=#567 id=567 data-nosnippet>567</a>            bloom_hit_pct,
-<a href=#568 id=568 data-nosnippet>568</a>            mega_paper_stats.cache_hits,
-<a href=#569 id=569 data-nosnippet>569</a>            cache_hit_pct,
-<a href=#570 id=570 data-nosnippet>570</a>            prefetch_time,
-<a href=#571 id=571 data-nosnippet>571</a>            edge_gen_time
-<a href=#572 id=572 data-nosnippet>572</a>        ));
-<a href=#573 id=573 data-nosnippet>573</a>    }
-<a href=#574 id=574 data-nosnippet>574</a>
-<a href=#575 id=575 data-nosnippet>575</a>    <span class="comment">// Calculate final weights and prepare for flush
-<a href=#576 id=576 data-nosnippet>576</a>    </span><span class="kw">for </span>(key, batch_increment) <span class="kw">in </span>batch_edge_weights {
-<a href=#577 id=577 data-nosnippet>577</a>        <span class="kw">let </span>current_weight = context.edge_cache.get(key).unwrap_or(<span class="number">0</span>);
-<a href=#578 id=578 data-nosnippet>578</a>        <span class="kw">let </span>final_weight = current_weight + batch_increment;
-<a href=#579 id=579 data-nosnippet>579</a>
-<a href=#580 id=580 data-nosnippet>580</a>        context.edge_cache.put(key, final_weight);
-<a href=#581 id=581 data-nosnippet>581</a>        <span class="kw-2">*</span>context.pending_edge_updates.entry(key).or_insert(<span class="number">0</span>) = final_weight;
-<a href=#582 id=582 data-nosnippet>582</a>    }
-<a href=#583 id=583 data-nosnippet>583</a>
-<a href=#584 id=584 data-nosnippet>584</a>    flush_buffer(context, <span class="kw-2">&amp;</span>engine)<span class="question-mark">?</span>;
-<a href=#585 id=585 data-nosnippet>585</a>
-<a href=#586 id=586 data-nosnippet>586</a>    <span class="prelude-val">Ok</span>(())
-<a href=#587 id=587 data-nosnippet>587</a>}
-<a href=#588 id=588 data-nosnippet>588</a>
-<a href=#589 id=589 data-nosnippet>589</a><span class="doccomment">/// Helper to get or create author vertex
-<a href=#590 id=590 data-nosnippet>590</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_or_create_author_vertex(
-<a href=#591 id=591 data-nosnippet>591</a>    name: <span class="kw-2">&amp;</span>str,
-<a href=#592 id=592 data-nosnippet>592</a>    write_buffer: <span class="kw-2">&amp;mut </span>Vec&lt;WriteOperation&gt;,
-<a href=#593 id=593 data-nosnippet>593</a>    author_cache: <span class="kw-2">&amp;mut </span>HashMap&lt;String, GraphVertex&gt;,
-<a href=#594 id=594 data-nosnippet>594</a>) -&gt; <span class="prelude-ty">Result</span>&lt;GraphVertex, Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
-<a href=#595 id=595 data-nosnippet>595</a>    <span class="kw">let </span>norm_name = normalize_author(name);
-<a href=#596 id=596 data-nosnippet>596</a>
-<a href=#597 id=597 data-nosnippet>597</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(v) = author_cache.get(<span class="kw-2">&amp;</span>norm_name) {
-<a href=#598 id=598 data-nosnippet>598</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(v.clone());
-<a href=#599 id=599 data-nosnippet>599</a>    }
-<a href=#600 id=600 data-nosnippet>600</a>
-<a href=#601 id=601 data-nosnippet>601</a>    <span class="kw">let </span>person_type = <span class="kw">crate</span>::db::schema::PERSON_TYPE;
-<a href=#602 id=602 data-nosnippet>602</a>    <span class="kw">let </span>v = GraphVertex::new(person_type).property(<span class="string">"name"</span>, name.to_string());
+<a href=#517 id=517 data-nosnippet>517</a>    <span class="kw">let </span><span class="kw-2">mut </span>batch_edge_weights: HashMap&lt;(u128, u128), u64&gt; = HashMap::new();
+<a href=#518 id=518 data-nosnippet>518</a>
+<a href=#519 id=519 data-nosnippet>519</a>    <span class="comment">// Track statistics for mega-papers
+<a href=#520 id=520 data-nosnippet>520</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>mega_paper_stats = MegaPaperStats::default();
+<a href=#521 id=521 data-nosnippet>521</a>
+<a href=#522 id=522 data-nosnippet>522</a>    <span class="kw">let </span>edge_gen_start = Instant::now();
+<a href=#523 id=523 data-nosnippet>523</a>    <span class="kw">for </span>authors <span class="kw">in </span><span class="kw-2">&amp;</span>record_author_vertices {
+<a href=#524 id=524 data-nosnippet>524</a>        <span class="kw">let </span>is_mega = authors.len() &gt; mega_threshold;
+<a href=#525 id=525 data-nosnippet>525</a>
+<a href=#526 id=526 data-nosnippet>526</a>        <span class="kw">if </span>is_mega {
+<a href=#527 id=527 data-nosnippet>527</a>            <span class="comment">// Separate path for mega-papers to track statistics
+<a href=#528 id=528 data-nosnippet>528</a>            </span><span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..authors.len() {
+<a href=#529 id=529 data-nosnippet>529</a>                <span class="kw">for </span>j <span class="kw">in </span>(i + <span class="number">1</span>)..authors.len() {
+<a href=#530 id=530 data-nosnippet>530</a>                    <span class="kw">let </span>id1 = authors[i].id.as_u128();
+<a href=#531 id=531 data-nosnippet>531</a>                    <span class="kw">let </span>id2 = authors[j].id.as_u128();
+<a href=#532 id=532 data-nosnippet>532</a>                    <span class="kw">let </span>key = <span class="kw">if </span>id1 &lt; id2 { (id1, id2) } <span class="kw">else </span>{ (id2, id1) };
+<a href=#533 id=533 data-nosnippet>533</a>
+<a href=#534 id=534 data-nosnippet>534</a>                    mega_paper_stats.total_pairs += <span class="number">1</span>;
+<a href=#535 id=535 data-nosnippet>535</a>
+<a href=#536 id=536 data-nosnippet>536</a>                    <span class="kw">if </span>batch_edge_bloom.check(<span class="kw-2">&amp;</span>key) {
+<a href=#537 id=537 data-nosnippet>537</a>                        <span class="kw-2">*</span>batch_edge_weights.entry(key).or_insert(<span class="number">0</span>) += <span class="number">1</span>;
+<a href=#538 id=538 data-nosnippet>538</a>                    } <span class="kw">else </span>{
+<a href=#539 id=539 data-nosnippet>539</a>                        <span class="comment">// Only check bloom/cache for new edges
+<a href=#540 id=540 data-nosnippet>540</a>                        </span><span class="kw">if </span>context.edge_cache.cold_bloom.check(<span class="kw-2">&amp;</span>key) {
+<a href=#541 id=541 data-nosnippet>541</a>                            mega_paper_stats.bloom_hits += <span class="number">1</span>;
+<a href=#542 id=542 data-nosnippet>542</a>                            <span class="kw">if </span>context.edge_cache.get(key).is_some() {
+<a href=#543 id=543 data-nosnippet>543</a>                                mega_paper_stats.cache_hits += <span class="number">1</span>;
+<a href=#544 id=544 data-nosnippet>544</a>                            }
+<a href=#545 id=545 data-nosnippet>545</a>                        }
+<a href=#546 id=546 data-nosnippet>546</a>                        batch_edge_bloom.set(<span class="kw-2">&amp;</span>key);
+<a href=#547 id=547 data-nosnippet>547</a>                        batch_edge_weights.insert(key, <span class="number">1</span>);
+<a href=#548 id=548 data-nosnippet>548</a>                    }
+<a href=#549 id=549 data-nosnippet>549</a>                }
+<a href=#550 id=550 data-nosnippet>550</a>            }
+<a href=#551 id=551 data-nosnippet>551</a>        } <span class="kw">else </span>{
+<a href=#552 id=552 data-nosnippet>552</a>            <span class="comment">// Fast path for normal papers without statistics overhead
+<a href=#553 id=553 data-nosnippet>553</a>            </span><span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..authors.len() {
+<a href=#554 id=554 data-nosnippet>554</a>                <span class="kw">for </span>j <span class="kw">in </span>(i + <span class="number">1</span>)..authors.len() {
+<a href=#555 id=555 data-nosnippet>555</a>                    <span class="kw">let </span>id1 = authors[i].id.as_u128();
+<a href=#556 id=556 data-nosnippet>556</a>                    <span class="kw">let </span>id2 = authors[j].id.as_u128();
+<a href=#557 id=557 data-nosnippet>557</a>                    <span class="kw">let </span>key = <span class="kw">if </span>id1 &lt; id2 { (id1, id2) } <span class="kw">else </span>{ (id2, id1) };
+<a href=#558 id=558 data-nosnippet>558</a>
+<a href=#559 id=559 data-nosnippet>559</a>                    <span class="kw">if </span>batch_edge_bloom.check(<span class="kw-2">&amp;</span>key) {
+<a href=#560 id=560 data-nosnippet>560</a>                        <span class="kw-2">*</span>batch_edge_weights.entry(key).or_insert(<span class="number">0</span>) += <span class="number">1</span>;
+<a href=#561 id=561 data-nosnippet>561</a>                    } <span class="kw">else </span>{
+<a href=#562 id=562 data-nosnippet>562</a>                        batch_edge_bloom.set(<span class="kw-2">&amp;</span>key);
+<a href=#563 id=563 data-nosnippet>563</a>                        batch_edge_weights.insert(key, <span class="number">1</span>);
+<a href=#564 id=564 data-nosnippet>564</a>                    }
+<a href=#565 id=565 data-nosnippet>565</a>                }
+<a href=#566 id=566 data-nosnippet>566</a>            }
+<a href=#567 id=567 data-nosnippet>567</a>        }
+<a href=#568 id=568 data-nosnippet>568</a>    }
+<a href=#569 id=569 data-nosnippet>569</a>    <span class="kw">let </span>edge_gen_time = edge_gen_start.elapsed().as_millis();
+<a href=#570 id=570 data-nosnippet>570</a>
+<a href=#571 id=571 data-nosnippet>571</a>    <span class="kw">if </span>has_mega_paper {
+<a href=#572 id=572 data-nosnippet>572</a>        <span class="kw">let </span>bloom_hit_pct = <span class="kw">if </span>mega_paper_stats.total_pairs &gt; <span class="number">0 </span>{
+<a href=#573 id=573 data-nosnippet>573</a>            (mega_paper_stats.bloom_hits <span class="kw">as </span>f64 / mega_paper_stats.total_pairs <span class="kw">as </span>f64) * <span class="number">100.0
+<a href=#574 id=574 data-nosnippet>574</a>        </span>} <span class="kw">else </span>{
+<a href=#575 id=575 data-nosnippet>575</a>            <span class="number">0.0
+<a href=#576 id=576 data-nosnippet>576</a>        </span>};
+<a href=#577 id=577 data-nosnippet>577</a>        <span class="kw">let </span>cache_hit_pct = <span class="kw">if </span>mega_paper_stats.total_pairs &gt; <span class="number">0 </span>{
+<a href=#578 id=578 data-nosnippet>578</a>            (mega_paper_stats.cache_hits <span class="kw">as </span>f64 / mega_paper_stats.total_pairs <span class="kw">as </span>f64) * <span class="number">100.0
+<a href=#579 id=579 data-nosnippet>579</a>        </span>} <span class="kw">else </span>{
+<a href=#580 id=580 data-nosnippet>580</a>            <span class="number">0.0
+<a href=#581 id=581 data-nosnippet>581</a>        </span>};
+<a href=#582 id=582 data-nosnippet>582</a>
+<a href=#583 id=583 data-nosnippet>583</a>        logger::debug(<span class="kw-2">&amp;</span><span class="macro">format!</span>(
+<a href=#584 id=584 data-nosnippet>584</a>            <span class="string">"Mega-paper metrics: {} pairs, bloom hits: {} ({:.1}%), cache hits: {} ({:.1}%), prefetch: {}ms, generation: {}ms"</span>,
+<a href=#585 id=585 data-nosnippet>585</a>            mega_paper_stats.total_pairs,
+<a href=#586 id=586 data-nosnippet>586</a>            mega_paper_stats.bloom_hits,
+<a href=#587 id=587 data-nosnippet>587</a>            bloom_hit_pct,
+<a href=#588 id=588 data-nosnippet>588</a>            mega_paper_stats.cache_hits,
+<a href=#589 id=589 data-nosnippet>589</a>            cache_hit_pct,
+<a href=#590 id=590 data-nosnippet>590</a>            prefetch_time,
+<a href=#591 id=591 data-nosnippet>591</a>            edge_gen_time
+<a href=#592 id=592 data-nosnippet>592</a>        ));
+<a href=#593 id=593 data-nosnippet>593</a>    }
+<a href=#594 id=594 data-nosnippet>594</a>
+<a href=#595 id=595 data-nosnippet>595</a>    <span class="comment">// Calculate final weights and prepare for flush
+<a href=#596 id=596 data-nosnippet>596</a>    </span><span class="kw">for </span>(key, batch_increment) <span class="kw">in </span>batch_edge_weights {
+<a href=#597 id=597 data-nosnippet>597</a>        <span class="kw">let </span>current_weight = context.edge_cache.get(key).unwrap_or(<span class="number">0</span>);
+<a href=#598 id=598 data-nosnippet>598</a>        <span class="kw">let </span>final_weight = current_weight + batch_increment;
+<a href=#599 id=599 data-nosnippet>599</a>
+<a href=#600 id=600 data-nosnippet>600</a>        context.edge_cache.put(key, final_weight);
+<a href=#601 id=601 data-nosnippet>601</a>        <span class="kw-2">*</span>context.pending_edge_updates.entry(key).or_insert(<span class="number">0</span>) = final_weight;
+<a href=#602 id=602 data-nosnippet>602</a>    }
 <a href=#603 id=603 data-nosnippet>603</a>
-<a href=#604 id=604 data-nosnippet>604</a>    write_buffer.push(WriteOperation::CreateVertex(v.clone()));
+<a href=#604 id=604 data-nosnippet>604</a>    flush_buffer(context, <span class="kw-2">&amp;</span>engine)<span class="question-mark">?</span>;
 <a href=#605 id=605 data-nosnippet>605</a>
-<a href=#606 id=606 data-nosnippet>606</a>    author_cache.insert(norm_name, v.clone());
-<a href=#607 id=607 data-nosnippet>607</a>    <span class="prelude-val">Ok</span>(v)
-<a href=#608 id=608 data-nosnippet>608</a>}
-<a href=#609 id=609 data-nosnippet>609</a>
-<a href=#610 id=610 data-nosnippet>610</a><span class="doccomment">/// Helper to add publication vertex
-<a href=#611 id=611 data-nosnippet>611</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_publication(
-<a href=#612 id=612 data-nosnippet>612</a>    record: <span class="kw-2">&amp;</span>PublicationRecord,
-<a href=#613 id=613 data-nosnippet>613</a>    write_buffer: <span class="kw-2">&amp;mut </span>Vec&lt;WriteOperation&gt;,
+<a href=#606 id=606 data-nosnippet>606</a>    <span class="prelude-val">Ok</span>(())
+<a href=#607 id=607 data-nosnippet>607</a>}
+<a href=#608 id=608 data-nosnippet>608</a>
+<a href=#609 id=609 data-nosnippet>609</a><span class="doccomment">/// Helper to get or create author vertex
+<a href=#610 id=610 data-nosnippet>610</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_or_create_author_vertex(
+<a href=#611 id=611 data-nosnippet>611</a>    name: <span class="kw-2">&amp;</span>str,
+<a href=#612 id=612 data-nosnippet>612</a>    write_buffer: <span class="kw-2">&amp;mut </span>Vec&lt;WriteOperation&gt;,
+<a href=#613 id=613 data-nosnippet>613</a>    author_cache: <span class="kw-2">&amp;mut </span>HashMap&lt;String, GraphVertex&gt;,
 <a href=#614 id=614 data-nosnippet>614</a>) -&gt; <span class="prelude-ty">Result</span>&lt;GraphVertex, Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
-<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">let </span>type_id = <span class="kw">crate</span>::db::schema::PUBLICATION_TYPE;
-<a href=#616 id=616 data-nosnippet>616</a>    <span class="kw">let </span><span class="kw-2">mut </span>v = GraphVertex::new(type_id)
-<a href=#617 id=617 data-nosnippet>617</a>        .property(<span class="string">"title"</span>, record.title.clone())
-<a href=#618 id=618 data-nosnippet>618</a>        .property(<span class="string">"year"</span>, record.year.to_string())
-<a href=#619 id=619 data-nosnippet>619</a>        .property(<span class="string">"publication_id"</span>, record.id.clone())
-<a href=#620 id=620 data-nosnippet>620</a>        .property(<span class="string">"source"</span>, record.source.clone());
-<a href=#621 id=621 data-nosnippet>621</a>
-<a href=#622 id=622 data-nosnippet>622</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(venue) = <span class="kw-2">&amp;</span>record.venue {
-<a href=#623 id=623 data-nosnippet>623</a>        v = v.property(<span class="string">"venue"</span>, venue.clone());
-<a href=#624 id=624 data-nosnippet>624</a>    }
+<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">let </span>norm_name = normalize_author(name);
+<a href=#616 id=616 data-nosnippet>616</a>
+<a href=#617 id=617 data-nosnippet>617</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(v) = author_cache.get(<span class="kw-2">&amp;</span>norm_name) {
+<a href=#618 id=618 data-nosnippet>618</a>        <span class="kw">return </span><span class="prelude-val">Ok</span>(v.clone());
+<a href=#619 id=619 data-nosnippet>619</a>    }
+<a href=#620 id=620 data-nosnippet>620</a>
+<a href=#621 id=621 data-nosnippet>621</a>    <span class="kw">let </span>person_type = <span class="kw">crate</span>::db::schema::PERSON_TYPE;
+<a href=#622 id=622 data-nosnippet>622</a>    <span class="kw">let </span>v = GraphVertex::new(person_type).property(<span class="string">"name"</span>, name.to_string());
+<a href=#623 id=623 data-nosnippet>623</a>
+<a href=#624 id=624 data-nosnippet>624</a>    write_buffer.push(WriteOperation::CreateVertex(v.clone()));
 <a href=#625 id=625 data-nosnippet>625</a>
-<a href=#626 id=626 data-nosnippet>626</a>    write_buffer.push(WriteOperation::CreateVertex(v.clone()));
-<a href=#627 id=627 data-nosnippet>627</a>
-<a href=#628 id=628 data-nosnippet>628</a>    <span class="prelude-val">Ok</span>(v)
-<a href=#629 id=629 data-nosnippet>629</a>}
-<a href=#630 id=630 data-nosnippet>630</a>
-<a href=#631 id=631 data-nosnippet>631</a><span class="doccomment">/// Create edge between author and publication
-<a href=#632 id=632 data-nosnippet>632</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>create_authored_edge(
-<a href=#633 id=633 data-nosnippet>633</a>    author: <span class="kw-2">&amp;</span>GraphVertex,
-<a href=#634 id=634 data-nosnippet>634</a>    publication: <span class="kw-2">&amp;</span>GraphVertex,
-<a href=#635 id=635 data-nosnippet>635</a>    write_buffer: <span class="kw-2">&amp;mut </span>Vec&lt;WriteOperation&gt;,
-<a href=#636 id=636 data-nosnippet>636</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
-<a href=#637 id=637 data-nosnippet>637</a>    <span class="kw">let </span>edge_type = <span class="kw">crate</span>::db::schema::AUTHORED_TYPE;
-<a href=#638 id=638 data-nosnippet>638</a>    <span class="kw">let </span>edge = GraphEdge::new(author.id, publication.id, edge_type);
-<a href=#639 id=639 data-nosnippet>639</a>    write_buffer.push(WriteOperation::CreateEdge(edge));
-<a href=#640 id=640 data-nosnippet>640</a>    <span class="prelude-val">Ok</span>(())
-<a href=#641 id=641 data-nosnippet>641</a>}
-<a href=#642 id=642 data-nosnippet>642</a>
-<a href=#643 id=643 data-nosnippet>643</a><span class="doccomment">/// Helper to check if publication exists in DB (using Bloom filter as first line of defense)
-<a href=#644 id=644 data-nosnippet>644</a></span><span class="attr">#[allow(dead_code)]
-<a href=#645 id=645 data-nosnippet>645</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>publication_exists(
-<a href=#646 id=646 data-nosnippet>646</a>    record: <span class="kw-2">&amp;</span>PublicationRecord,
-<a href=#647 id=647 data-nosnippet>647</a>    engine: <span class="kw-2">&amp;</span>Arc&lt;HelixGraphEngine&gt;,
-<a href=#648 id=648 data-nosnippet>648</a>    config: <span class="kw-2">&amp;</span>Config,
-<a href=#649 id=649 data-nosnippet>649</a>    cache: <span class="kw-2">&amp;mut </span>DeduplicationCache,
-<a href=#650 id=650 data-nosnippet>650</a>) -&gt; bool {
-<a href=#651 id=651 data-nosnippet>651</a>    cache.check_exists_and_cache(record, engine, config)
-<a href=#652 id=652 data-nosnippet>652</a>}
+<a href=#626 id=626 data-nosnippet>626</a>    author_cache.insert(norm_name, v.clone());
+<a href=#627 id=627 data-nosnippet>627</a>    <span class="prelude-val">Ok</span>(v)
+<a href=#628 id=628 data-nosnippet>628</a>}
+<a href=#629 id=629 data-nosnippet>629</a>
+<a href=#630 id=630 data-nosnippet>630</a><span class="doccomment">/// Helper to add publication vertex
+<a href=#631 id=631 data-nosnippet>631</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_publication(
+<a href=#632 id=632 data-nosnippet>632</a>    record: <span class="kw-2">&amp;</span>PublicationRecord,
+<a href=#633 id=633 data-nosnippet>633</a>    write_buffer: <span class="kw-2">&amp;mut </span>Vec&lt;WriteOperation&gt;,
+<a href=#634 id=634 data-nosnippet>634</a>) -&gt; <span class="prelude-ty">Result</span>&lt;GraphVertex, Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
+<a href=#635 id=635 data-nosnippet>635</a>    <span class="kw">let </span>type_id = <span class="kw">crate</span>::db::schema::PUBLICATION_TYPE;
+<a href=#636 id=636 data-nosnippet>636</a>    <span class="kw">let </span><span class="kw-2">mut </span>v = GraphVertex::new(type_id)
+<a href=#637 id=637 data-nosnippet>637</a>        .property(<span class="string">"title"</span>, record.title.clone())
+<a href=#638 id=638 data-nosnippet>638</a>        .property(<span class="string">"year"</span>, record.year.to_string())
+<a href=#639 id=639 data-nosnippet>639</a>        .property(<span class="string">"publication_id"</span>, record.id.clone())
+<a href=#640 id=640 data-nosnippet>640</a>        .property(<span class="string">"source"</span>, record.source.clone());
+<a href=#641 id=641 data-nosnippet>641</a>
+<a href=#642 id=642 data-nosnippet>642</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(venue) = <span class="kw-2">&amp;</span>record.venue {
+<a href=#643 id=643 data-nosnippet>643</a>        v = v.property(<span class="string">"venue"</span>, venue.clone());
+<a href=#644 id=644 data-nosnippet>644</a>    }
+<a href=#645 id=645 data-nosnippet>645</a>
+<a href=#646 id=646 data-nosnippet>646</a>    write_buffer.push(WriteOperation::CreateVertex(v.clone()));
+<a href=#647 id=647 data-nosnippet>647</a>
+<a href=#648 id=648 data-nosnippet>648</a>    <span class="prelude-val">Ok</span>(v)
+<a href=#649 id=649 data-nosnippet>649</a>}
+<a href=#650 id=650 data-nosnippet>650</a>
+<a href=#651 id=651 data-nosnippet>651</a><span class="doccomment">/// Create edge between author and publication
+<a href=#652 id=652 data-nosnippet>652</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>create_authored_edge(
+<a href=#653 id=653 data-nosnippet>653</a>    author: <span class="kw-2">&amp;</span>GraphVertex,
+<a href=#654 id=654 data-nosnippet>654</a>    publication: <span class="kw-2">&amp;</span>GraphVertex,
+<a href=#655 id=655 data-nosnippet>655</a>    write_buffer: <span class="kw-2">&amp;mut </span>Vec&lt;WriteOperation&gt;,
+<a href=#656 id=656 data-nosnippet>656</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>std::error::Error&gt;&gt; {
+<a href=#657 id=657 data-nosnippet>657</a>    <span class="kw">let </span>edge_type = <span class="kw">crate</span>::db::schema::AUTHORED_TYPE;
+<a href=#658 id=658 data-nosnippet>658</a>    <span class="kw">let </span>edge = GraphEdge::new(author.id, publication.id, edge_type);
+<a href=#659 id=659 data-nosnippet>659</a>    write_buffer.push(WriteOperation::CreateEdge(edge));
+<a href=#660 id=660 data-nosnippet>660</a>    <span class="prelude-val">Ok</span>(())
+<a href=#661 id=661 data-nosnippet>661</a>}
+<a href=#662 id=662 data-nosnippet>662</a>
+<a href=#663 id=663 data-nosnippet>663</a><span class="doccomment">/// Helper to check if publication exists in DB (using Bloom filter as first line of defense)
+<a href=#664 id=664 data-nosnippet>664</a></span><span class="attr">#[allow(dead_code)]
+<a href=#665 id=665 data-nosnippet>665</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>publication_exists(
+<a href=#666 id=666 data-nosnippet>666</a>    record: <span class="kw-2">&amp;</span>PublicationRecord,
+<a href=#667 id=667 data-nosnippet>667</a>    engine: <span class="kw-2">&amp;</span>Arc&lt;HelixGraphEngine&gt;,
+<a href=#668 id=668 data-nosnippet>668</a>    config: <span class="kw-2">&amp;</span>Config,
+<a href=#669 id=669 data-nosnippet>669</a>    cache: <span class="kw-2">&amp;mut </span>DeduplicationCache,
+<a href=#670 id=670 data-nosnippet>670</a>) -&gt; bool {
+<a href=#671 id=671 data-nosnippet>671</a>    cache.check_exists_and_cache(record, engine, config)
+<a href=#672 id=672 data-nosnippet>672</a>}
 </code></pre></div></section></main></body></html>
