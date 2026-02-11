@@ -5,7 +5,6 @@
 
 use crate::config::{Config, DeduplicationConfig, IngestionConfig, ScraperConfig};
 use crate::db::ingestion::{get_checkpoint, orchestrate_scraping_and_ingestion, set_checkpoint};
-use crate::scrapers::scraping_orchestrator::run_scrape_with_modes;
 use chrono::{Duration, Utc};
 use helix_db::helix_engine::traversal_core::HelixGraphEngine;
 use helix_db::helix_engine::traversal_core::HelixGraphEngineOpts;
@@ -77,7 +76,7 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("initial", sources.clone(), database, &config).await;
+            orchestrate_scraping_and_ingestion("initial", sources.clone(), None, database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -130,7 +129,7 @@ mod tests {
         set_checkpoint("dblp", checkpoint_date, &checkpoint_dir)?;
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -181,7 +180,7 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
 
         let arxiv_checkpoint = get_checkpoint("arxiv", &checkpoint_dir)?;
         let dblp_checkpoint = get_checkpoint("dblp", &checkpoint_dir)?;
@@ -241,6 +240,7 @@ mod tests {
         let result1 = orchestrate_scraping_and_ingestion(
             "weekly",
             sources.clone(),
+            None,
             database.clone(),
             &config,
         )
@@ -255,7 +255,7 @@ mod tests {
         let first_checkpoint = checkpoint_after_first.unwrap();
 
         let result2 =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
         assert!(result2.is_ok(), "Second run failed: {:?}", result2.err());
 
         let checkpoint_after_second = get_checkpoint("arxiv", &checkpoint_dir)?;
@@ -311,7 +311,7 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -360,7 +360,7 @@ mod tests {
         set_checkpoint("arxiv", recent_checkpoint, &checkpoint_dir)?;
 
         let result =
-            orchestrate_scraping_and_ingestion("full", sources.clone(), database, &config).await;
+            orchestrate_scraping_and_ingestion("full", sources.clone(), None, database, &config).await;
 
         assert!(
             result.is_ok(),
@@ -378,7 +378,7 @@ mod tests {
         let config = Config::default();
 
         let result =
-            orchestrate_scraping_and_ingestion("invalid_mode", sources.clone(), database, &config)
+            orchestrate_scraping_and_ingestion("invalid_mode", sources.clone(), None, database, &config)
                 .await;
 
         assert!(result.is_err(), "Should fail with invalid mode");
@@ -431,14 +431,10 @@ mod tests {
             log_level: crate::logger::LogLevel::Info,
         };
 
-        let start_date = Utc::now() - Duration::days(7);
-        let end_date = Utc::now();
-
-        let result = run_scrape_with_modes(
-            start_date,
-            end_date,
+        let result = orchestrate_scraping_and_ingestion(
+            "weekly",
             sources.clone(),
-            source_modes,
+            Some(source_modes),
             database,
             &config,
         )
@@ -494,14 +490,10 @@ mod tests {
             log_level: crate::logger::LogLevel::Info,
         };
 
-        let start_date = Utc::now() - Duration::days(7);
-        let end_date = Utc::now();
-
-        let result = run_scrape_with_modes(
-            start_date,
-            end_date,
+        let result = orchestrate_scraping_and_ingestion(
+            "weekly",
             sources.clone(),
-            source_modes,
+            Some(source_modes),
             database,
             &config,
         )
@@ -558,14 +550,10 @@ mod tests {
             log_level: crate::logger::LogLevel::Info,
         };
 
-        let start_date = Utc::now() - Duration::days(1);
-        let end_date = Utc::now();
-
-        let result = run_scrape_with_modes(
-            start_date,
-            end_date,
+        let result = orchestrate_scraping_and_ingestion(
+            "weekly",
             sources.clone(),
-            source_modes,
+            Some(source_modes),
             database,
             &config,
         )

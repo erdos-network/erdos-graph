@@ -579,7 +579,15 @@ pub async fn scrape_range_xml(
 
     let client = Client::new();
 
-    // Generate list of monthly snapshots to download
+    // Find the most recent available snapshot (DBLP publishes with a delay)
+    let (latest_year, latest_month) = find_latest_available_snapshot(&client, &config.xml_base_url).await?;
+    
+    logger::info(&format!(
+        "Latest available DBLP snapshot: {}-{:02}",
+        latest_year, latest_month
+    ));
+
+    // Generate list of monthly snapshots to download, capped at latest available
     let mut snapshots = Vec::new();
     
     for year in start_year..=end_year {
@@ -587,17 +595,30 @@ pub async fn scrape_range_xml(
         let month_end = if year == end_year { end_month } else { 12 };
         
         for month in month_start..=month_end {
-            snapshots.push((year, month));
+            // Only include snapshots that are available (not in the future)
+            if year < latest_year || (year == latest_year && month <= latest_month) {
+                snapshots.push((year, month));
+            } else {
+                logger::warn(&format!(
+                    "Skipping {}-{:02} snapshot (not yet published, latest is {}-{:02})",
+                    year, month, latest_year, latest_month
+                ));
+            }
         }
+    }
+
+    if snapshots.is_empty() {
+        logger::warn("No DBLP snapshots available for the requested date range");
+        return Ok(());
     }
 
     logger::info(&format!(
         "XML mode: Processing {} monthly snapshots from {}-{:02} to {}-{:02}",
         snapshots.len(),
-        start_year,
-        start_month,
-        end_year,
-        end_month
+        snapshots[0].0,
+        snapshots[0].1,
+        snapshots[snapshots.len() - 1].0,
+        snapshots[snapshots.len() - 1].1
     ));
 
     // Process each monthly snapshot
@@ -649,19 +670,78 @@ pub async fn scrape_range_xml(
     Ok(())
 }
 
+/// Finds the most recent available DBLP XML snapshot by checking recent months.
+///
+/// DBLP publishes monthly snapshots with a delay, so we need to find which
+/// month is actually available rather than assuming the current month exists.
+async fn find_latest_available_snapshot(
+    client: &Client,
+    base_url: &str,
+) -> Result<(i32, u32), Box<dyn std::error::Error>> {
+    let now = Utc::now();
+
+    // Check the last 6 months to find the most recent available snapshot
+    for months_back in 0..6 {
+        let check_date = now - chrono::Duration::days(months_back * 30);
+        let year = check_date.year();
+        let month = check_date.month();
+
+        let url = format!("{}/release/dblp-{:04}-{:02}-01.xml.gz", base_url, year, month);
+        
+        logger::debug(&format!("Checking for snapshot: {}", url));
+        
+        // Try a HEAD request first to check if the file exists
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            client.head(&url).send()
+        ).await {
+            Ok(Ok(response)) if response.status().is_success() => {
+                logger::info(&format!("Found available snapshot: {}-{:02}", year, month));
+                return Ok((year, month));
+            }
+            _ => {
+                logger::debug(&format!("Snapshot {}-{:02} not available", year, month));
+                continue;
+            }
+        }
+    }
+
+    // If we can't find any recent snapshot, fall back to 2 months ago
+    // (DBLP typically has a 1-2 month delay)
+    let fallback_date = now - chrono::Duration::days(60);
+    let year = fallback_date.year();
+    let month = fallback_date.month();
+    
+    logger::warn(&format!(
+        "Could not verify available snapshots, falling back to {}-{:02}",
+        year, month
+    ));
+    
+    Ok((year, month))
+}
+
 /// Downloads a file from a URL to a local path.
 async fn download_file(
     client: &Client,
     url: &str,
     filepath: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let response = client.get(url).send().await?;
+    // Add timeout to prevent hanging
+    let response = tokio::time::timeout(
+        Duration::from_secs(300), // 5 minute timeout for large files
+        client.get(url).send()
+    ).await??;
     
     if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()).into());
     }
 
-    let bytes = response.bytes().await?;
+    // Also add timeout for downloading the body
+    let bytes = tokio::time::timeout(
+        Duration::from_secs(600), // 10 minute timeout for downloading
+        response.bytes()
+    ).await??;
+    
     fs::write(filepath, bytes)?;
     
     Ok(())

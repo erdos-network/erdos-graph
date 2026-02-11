@@ -27,7 +27,13 @@ pub async fn run_full_refresh(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting full refresh scrape for sources: {:?}", sources);
 
-    match orchestrate_scraping_and_ingestion("initial", sources.clone(), datastore, &config).await {
+    // Use XML mode for DBLP in full refresh (faster for large date ranges)
+    let mut source_modes = std::collections::HashMap::new();
+    if sources.contains(&"dblp".to_string()) {
+        source_modes.insert("dblp".to_string(), "xml".to_string());
+    }
+
+    match orchestrate_scraping_and_ingestion("initial", sources.clone(), Some(source_modes), datastore, &config).await {
         Ok(_) => {
             println!(
                 "Full refresh scrape completed successfully for sources: {:?}",

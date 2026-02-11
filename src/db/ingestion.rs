@@ -100,18 +100,38 @@ pub fn set_checkpoint(
 ///
 /// # Returns
 /// `Ok(())` on success, or an error if processing fails
+/// Orchestrates scraping and ingestion with optional source-specific scraping modes.
+///
+/// This function handles:
+/// - Calculating date ranges based on mode and checkpoints
+/// - Breaking the range into chunks
+/// - Running scrapers for each chunk with optional per-source modes
+/// - Updating checkpoints after each chunk
+///
+/// # Arguments
+/// * `mode` - Processing mode: "initial", "weekly", or "full"
+/// * `sources` - List of sources to scrape
+/// * `source_modes` - Optional map of source names to their scraping modes (e.g., "dblp" -> "xml")
+/// * `datastore` - Arc-wrapped HelixGraphEngine
+/// * `config` - Reference to the application configuration
+///
+/// # Returns
+/// `Ok(())` on success, or an error if processing fails
 #[coverage(off)]
 pub async fn orchestrate_scraping_and_ingestion(
     mode: &str,
     sources: Vec<String>,
+    source_modes: Option<std::collections::HashMap<String, String>>,
     datastore: Arc<HelixGraphEngine>,
     config: &crate::config::Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::scrapers::scraping_orchestrator::run_scrape;
+    use crate::scrapers::scraping_orchestrator::run_scrape_with_modes;
 
+    let source_modes = source_modes.unwrap_or_default();
+    
     logger::info(&format!(
-        "Orchestrating scraping for sources: {:?} in mode: {}",
-        sources, mode
+        "Orchestrating scraping for sources: {:?} in mode: {} with source modes: {:?}",
+        sources, mode, source_modes
     ));
 
     let default_checkpoint_dir = "checkpoints".to_string();
@@ -139,7 +159,7 @@ pub async fn orchestrate_scraping_and_ingestion(
         total_chunks, config.ingestion.chunk_size_days
     ));
 
-    // Run run_scrape for each chunk (all sources in parallel) and update checkpoints
+    // Run run_scrape_with_modes for each chunk (all sources in parallel) and update checkpoints
     for (i, (chunk_start, chunk_end)) in chunks.into_iter().enumerate() {
         logger::info(&format!(
             "Processing chunk {}/{}: {} to {}",
@@ -149,11 +169,12 @@ pub async fn orchestrate_scraping_and_ingestion(
             chunk_end
         ));
 
-        // Pass sources list to run_scrape
-        run_scrape(
+        // Pass sources list and modes to run_scrape_with_modes
+        run_scrape_with_modes(
             chunk_start,
             chunk_end,
             sources.clone(),
+            source_modes.clone(),
             datastore.clone(),
             config,
         )

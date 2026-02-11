@@ -61,9 +61,15 @@ pub async fn run_benchmark(
     // Override weekly_days in config for the benchmark
     config.ingestion.weekly_days = num_weeks * 7;
 
+    // Use XML mode for DBLP in benchmark (faster for large date ranges)
+    let mut source_modes = std::collections::HashMap::new();
+    if sources.contains(&"dblp".to_string()) {
+        source_modes.insert("dblp".to_string(), "xml".to_string());
+    }
+
     let start_time = Instant::now();
 
-    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), datastore, &config).await {
+    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), Some(source_modes), datastore, &config).await {
         Ok(_) => {
             let duration = start_time.elapsed();
             logger::info(&format!(
