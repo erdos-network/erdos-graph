@@ -42,5 +42,5 @@
     },
     "heartbeat_timeout_s": 30,
     "polling_interval_ms": 100,
-    "log_level": "debug"
+    "log_level": "info"
 }

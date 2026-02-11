@@ -52,16 +52,30 @@ impl Scraper for ArxivScraper {
 }
 
 // Normalize text nodes: strip CDATA markers and unescape XML entities.
+// Optimized to minimize allocations
 fn normalize_text(txt: &str) -> String {
     let s = txt.trim();
+    if s.is_empty() {
+        return String::new();
+    }
     if s.starts_with("<![CDATA[") && s.ends_with("]]>") {
         let inner = &s[9..s.len() - 3];
         return inner.trim().to_string();
     }
-    if let Ok(cow) = quick_unescape(s) {
-        return cow.into_owned().trim().to_string();
+    // quick_unescape returns Cow - only allocates if unescaping is needed
+    match quick_unescape(s) {
+        Ok(cow) => {
+            let unescaped = cow.as_ref();
+            if unescaped == s {
+                // No unescaping was needed, just return trimmed original
+                s.to_string()
+            } else {
+                // Unescaping happened, trim the result
+                unescaped.trim().to_string()
+            }
+        }
+        Err(_) => s.to_string(),
     }
-    s.to_string()
 }
 
 // Extract the `term` attribute (or namespaced variant) from a start element's
@@ -155,17 +169,6 @@ fn parse_entry_str(
     let mut cur_primary_cat: Option<String> = None;
     let mut cur_authors: Vec<String> = Vec::new();
 
-    // Pre-scan for primary_category attribute to handle odd namespace placement
-    if cur_primary_cat.is_none()
-        && let Some(idx) = entry_str.find("primary_category")
-        && let Some(term_pos) = entry_str[idx..].find("term=\"")
-    {
-        let start = idx + term_pos + "term=\"".len();
-        if let Some(endpos) = entry_str[start..].find('"') {
-            cur_primary_cat = Some(entry_str[start..start + endpos].to_string());
-        }
-    }
-
     // Main XML event loop to populate entry fields
     loop {
         tmp.clear();
@@ -250,10 +253,23 @@ fn parse_entry_str(
                     let published_utc = published_dt.with_timezone(&Utc);
                     let year = published_utc.year() as u32;
 
+                    // Fallback: if XML parser didn't find primary_category, try substring search
+                    // This handles edge cases with malformed XML
+                    if cur_primary_cat.is_none() {
+                        if let Some(idx) = entry_str.find("primary_category") {
+                            if let Some(term_pos) = entry_str[idx..].find("term=\"") {
+                                let start = idx + term_pos + "term=\"".len();
+                                if let Some(endpos) = entry_str[start..].find('"') {
+                                    cur_primary_cat = Some(entry_str[start..start + endpos].to_string());
+                                }
+                            }
+                        }
+                    }
+
                     return Some(PublicationRecord {
                         id: cur_id.take().unwrap_or_default(),
                         title: cur_title.take().unwrap_or_default(),
-                        authors: cur_authors.clone(),
+                        authors: std::mem::take(&mut cur_authors),  // Move instead of clone
                         year,
                         // Prefer journal reference; fall back to primary
                         // category when journal_ref is absent.
@@ -392,7 +408,8 @@ pub async fn scrape_range_with_config_async(
         // when to stop (arXiv returns fewer than page_size when exhausted)
         // Remember how many results we processed in this page
         let mut page_record_count = 0;
-        let mut buf_acc: Vec<u8> = Vec::new();
+        // Pre-allocate buffer: ~2KB per entry average, so for 5000 entries = ~10MB
+        let mut buf_acc: Vec<u8> = Vec::with_capacity(10 * 1024 * 1024);
 
         loop {
             match resp.chunk().await? {

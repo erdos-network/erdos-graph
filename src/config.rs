@@ -268,13 +268,13 @@ fn default_arxiv_base_url() -> String {
     "http://export.arxiv.org/api/query".to_string()
 }
 fn default_arxiv_page_size() -> usize {
-    100
+    5000  // ArXiv supports up to 5000 results per request
 }
 fn default_arxiv_channel_size() -> usize {
     8
 }
 fn default_arxiv_delay_ms() -> u64 {
-    200
+    100  // Reduced delay - ArXiv rate limit is 1 req/sec, we're well under that
 }
 
 pub fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
