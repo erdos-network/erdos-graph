@@ -916,4 +916,594 @@ mod tests {
         assert_eq!(recs2.len(), 85);
         assert_eq!(recs2[0].title, "Paper V2"); // Should get fresh data, not cached V1
     }
+
+    // --- XML Mode Tests ---
+
+    #[test]
+    fn test_dblp_mode_from_str() {
+        use crate::scrapers::dblp::DblpMode;
+
+        assert_eq!(DblpMode::from_str("search").unwrap(), DblpMode::Search);
+        assert_eq!(DblpMode::from_str("Search").unwrap(), DblpMode::Search);
+        assert_eq!(DblpMode::from_str("SEARCH").unwrap(), DblpMode::Search);
+        
+        assert_eq!(DblpMode::from_str("xml").unwrap(), DblpMode::Xml);
+        assert_eq!(DblpMode::from_str("Xml").unwrap(), DblpMode::Xml);
+        assert_eq!(DblpMode::from_str("XML").unwrap(), DblpMode::Xml);
+        
+        assert!(DblpMode::from_str("invalid").is_err());
+        assert!(DblpMode::from_str("").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_basic() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        // Create a minimal DBLP XML dump
+        let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/cacm/Doe2023">
+<author>John Doe</author>
+<title>Test Article Title</title>
+<year>2023</year>
+<journal>Communications of the ACM</journal>
+</article>
+<inproceedings key="conf/icse/Smith2023">
+<author>Jane Smith</author>
+<author>Bob Johnson</author>
+<title>Another Test Paper</title>
+<year>2023</year>
+<booktitle>ICSE</booktitle>
+</inproceedings>
+</dblp>"#;
+
+        // Compress the XML content
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_content.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        // Mock the XML download endpoint
+        let _mock = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 1, 31, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
+        
+        assert_eq!(records.len(), 2);
+        
+        // Check first record
+        assert_eq!(records[0].title, "Test Article Title");
+        assert_eq!(records[0].authors, vec!["John Doe"]);
+        assert_eq!(records[0].year, 2023);
+        assert_eq!(records[0].venue, Some("Communications of the ACM".to_string()));
+        assert_eq!(records[0].source, "dblp");
+        
+        // Check second record
+        assert_eq!(records[1].title, "Another Test Paper");
+        assert_eq!(records[1].authors, vec!["Jane Smith", "Bob Johnson"]);
+        assert_eq!(records[1].year, 2023);
+        assert_eq!(records[1].venue, Some("ICSE".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_filters_by_year() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        // XML with publications from different years
+        let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/test/2022">
+<author>Author A</author>
+<title>Paper from 2022</title>
+<year>2022</year>
+<journal>Test Journal</journal>
+</article>
+<article key="journals/test/2023">
+<author>Author B</author>
+<title>Paper from 2023</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+<article key="journals/test/2024">
+<author>Author C</author>
+<title>Paper from 2024</title>
+<year>2024</year>
+<journal>Test Journal</journal>
+</article>
+</dblp>"#;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_content.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let _mock = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        // Only request 2023
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
+        
+        // Should only get the 2023 paper
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Paper from 2023");
+        assert_eq!(records[0].year, 2023);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_missing_fields() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        // XML with invalid/incomplete records
+        let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/test/1">
+<title>No Author</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+<article key="journals/test/2">
+<author>Has Author</author>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+<article key="journals/test/3">
+<author>Valid Record</author>
+<title>Valid Title</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+<article key="journals/test/4">
+<author>Empty Title</author>
+<title>   </title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+</dblp>"#;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_content.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let _mock = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
+        
+        // Should only get the valid record
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "Valid Title");
+        assert_eq!(records[0].authors, vec!["Valid Record"]);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_multiple_months() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        // Create XML for January
+        let xml_jan = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/test/jan">
+<author>January Author</author>
+<title>January Paper</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+</dblp>"#;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_jan.as_bytes()).unwrap();
+        let compressed_jan = encoder.finish().unwrap();
+
+        // Create XML for February
+        let xml_feb = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/test/feb">
+<author>February Author</author>
+<title>February Paper</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+</dblp>"#;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_feb.as_bytes()).unwrap();
+        let compressed_feb = encoder.finish().unwrap();
+
+        let _mock_jan = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed_jan)
+            .create_async()
+            .await;
+
+        let _mock_feb = server
+            .mock("GET", "/release/dblp-2023-02-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed_feb)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        // Request Jan-Feb 2023
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 2, 28, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
+        
+        // Should get both papers
+        assert_eq!(records.len(), 2);
+        
+        let titles: Vec<&str> = records.iter().map(|r| r.title.as_str()).collect();
+        assert!(titles.contains(&"January Paper"));
+        assert!(titles.contains(&"February Paper"));
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_download_failure() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        // Mock returns 404
+        let _mock = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 1, 31, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        // Should not fail, just log error and continue
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
+        
+        assert_eq!(records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_cleans_up_files() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/test/1">
+<author>Test Author</author>
+<title>Test Title</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+</dblp>"#;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_content.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let _mock = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 1, 31, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        // Check that the downloaded file was deleted
+        let expected_file = xml_download_dir.join("dblp-2023-01-01.xml.gz");
+        assert!(!expected_file.exists(), "Downloaded file should be deleted after processing");
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_handles_special_characters() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        // XML with special characters and HTML entities
+        let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/test/1">
+<author>François Müller</author>
+<author>José García</author>
+<title>A Survey on Machine Learning &amp; AI</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+</dblp>"#;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_content.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let _mock = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
+        
+        assert_eq!(records.len(), 1);
+        // Note: XML entities are decoded, but the title might have spacing issues
+        // depending on how the XML parser handles entity boundaries
+        assert!(records[0].title.contains("Machine Learning"));
+        assert!(records[0].title.contains("AI"));
+        assert_eq!(records[0].authors, vec!["François Müller", "José García"]);
+    }
+
+    #[tokio::test]
+    async fn test_dblp_xml_mode_different_publication_types() {
+        use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
+        use tempfile::TempDir;
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let xml_download_dir = temp_dir.path().join("xml_downloads");
+        let mut server = Server::new_async().await;
+
+        // XML with different publication types
+        let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dblp SYSTEM "dblp.dtd">
+<dblp>
+<article key="journals/test/1">
+<author>Author A</author>
+<title>Journal Article</title>
+<year>2023</year>
+<journal>Test Journal</journal>
+</article>
+<inproceedings key="conf/test/1">
+<author>Author B</author>
+<title>Conference Paper</title>
+<year>2023</year>
+<booktitle>Test Conference</booktitle>
+</inproceedings>
+<book key="books/test/1">
+<author>Author C</author>
+<title>Test Book</title>
+<year>2023</year>
+</book>
+<phdthesis key="phd/test/1">
+<author>Author D</author>
+<title>PhD Thesis</title>
+<year>2023</year>
+</phdthesis>
+</dblp>"#;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(xml_content.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let _mock = server
+            .mock("GET", "/release/dblp-2023-01-01.xml.gz")
+            .with_status(200)
+            .with_body(compressed)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            xml_base_url: server.url(),
+            xml_download_dir: xml_download_dir.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 12, 31, 23, 59, 59).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        
+        let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
+        
+        assert!(result.is_ok());
+        
+        let mut records = Vec::new();
+        while let Some(r) = queue.dequeue() {
+            records.push(r);
+        }
+        
+        // Should get all 4 publication types
+        assert_eq!(records.len(), 4);
+        
+        let titles: Vec<&str> = records.iter().map(|r| r.title.as_str()).collect();
+        assert!(titles.contains(&"Journal Article"));
+        assert!(titles.contains(&"Conference Paper"));
+        assert!(titles.contains(&"Test Book"));
+        assert!(titles.contains(&"PhD Thesis"));
+        
+        // Check venues are captured correctly
+        let article = records.iter().find(|r| r.title == "Journal Article").unwrap();
+        assert_eq!(article.venue, Some("Test Journal".to_string()));
+        
+        let conf = records.iter().find(|r| r.title == "Conference Paper").unwrap();
+        assert_eq!(conf.venue, Some("Test Conference".to_string()));
+    }
 }

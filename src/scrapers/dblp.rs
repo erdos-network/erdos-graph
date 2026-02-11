@@ -42,11 +42,36 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::BufReader;
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
+use flate2::read::GzDecoder;
+use quick_xml::events::Event;
+use quick_xml::Reader;
+use quick_xml::escape::unescape as quick_unescape;
 
 use crate::config::DblpSourceConfig;
+
+/// Scraping mode for DBLP
+#[derive(Clone, Debug, PartialEq)]
+pub enum DblpMode {
+    /// Use the DBLP Search API with multiple queries
+    Search,
+    /// Use XML dump files (monthly snapshots)
+    Xml,
+}
+
+impl DblpMode {
+    /// Parse mode from string
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "search" => Ok(DblpMode::Search),
+            "xml" => Ok(DblpMode::Xml),
+            _ => Err(format!("Invalid DBLP mode: '{}'. Must be 'search' or 'xml'", s)),
+        }
+    }
+}
 
 /// Dblp scraper that implements the Scraper trait.
 ///
@@ -488,4 +513,341 @@ fn convert_hit_to_record(info: DblpInfo) -> Option<PublicationRecord> {
         venue,
         source: "dblp".to_string(),
     })
+}
+
+// --- XML Dump Scraping Functions ---
+
+/// Scrapes DBLP using XML dump files for a specified date range.
+///
+/// This function downloads monthly XML snapshots, parses them efficiently,
+/// and deletes each file after processing to save disk space.
+///
+/// # Arguments
+///
+/// * `start_date` - The start of the date range (inclusive).
+/// * `end_date` - The end of the date range (inclusive).
+/// * `config` - The `DblpSourceConfig` to use for the scraper.
+/// * `producer` - Queue producer to submit parsed records.
+///
+/// # Returns
+///
+/// Returns a `Result` indicating success or failure.
+pub async fn scrape_range_xml(
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
+    config: DblpSourceConfig,
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if start_date >= end_date {
+        return Ok(());
+    }
+
+    let start_year = start_date.year();
+    let end_year = end_date.year();
+    let start_month = start_date.month();
+    let end_month = end_date.month();
+
+    // Create download directory if it doesn't exist
+    let download_dir = Path::new(&config.xml_download_dir);
+    if !download_dir.exists() {
+        fs::create_dir_all(download_dir)?;
+    }
+
+    let client = Client::new();
+
+    // Generate list of monthly snapshots to download
+    let mut snapshots = Vec::new();
+    
+    for year in start_year..=end_year {
+        let month_start = if year == start_year { start_month } else { 1 };
+        let month_end = if year == end_year { end_month } else { 12 };
+        
+        for month in month_start..=month_end {
+            snapshots.push((year, month));
+        }
+    }
+
+    logger::info(&format!(
+        "XML mode: Processing {} monthly snapshots from {}-{:02} to {}-{:02}",
+        snapshots.len(),
+        start_year,
+        start_month,
+        end_year,
+        end_month
+    ));
+
+    // Process each monthly snapshot
+    for (year, month) in snapshots {
+        let url = format!(
+            "{}/release/dblp-{:04}-{:02}-01.xml.gz",
+            config.xml_base_url, year, month
+        );
+        
+        let filename = format!("dblp-{:04}-{:02}-01.xml.gz", year, month);
+        let filepath = download_dir.join(&filename);
+
+        logger::info(&format!("Downloading XML snapshot: {}", url));
+
+        // Download the file
+        match download_file(&client, &url, &filepath).await {
+            Ok(_) => {
+                logger::info(&format!("Successfully downloaded: {}", filename));
+                
+                // Parse the XML file
+                logger::info(&format!("Parsing XML file: {}", filename));
+                match parse_xml_dump(&filepath, start_date, end_date, &producer) {
+                    Ok(count) => {
+                        logger::info(&format!(
+                            "Parsed {} records from {}",
+                            count, filename
+                        ));
+                    }
+                    Err(e) => {
+                        logger::error(&format!("Failed to parse {}: {}", filename, e));
+                    }
+                }
+
+                // Delete the file to save space
+                if let Err(e) = fs::remove_file(&filepath) {
+                    logger::warn(&format!("Failed to delete {}: {}", filename, e));
+                } else {
+                    logger::debug(&format!("Deleted temporary file: {}", filename));
+                }
+            }
+            Err(e) => {
+                logger::error(&format!("Failed to download {}: {}", url, e));
+                // Continue with next snapshot instead of failing completely
+                continue;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Downloads a file from a URL to a local path.
+async fn download_file(
+    client: &Client,
+    url: &str,
+    filepath: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response = client.get(url).send().await?;
+    
+    if !response.status().is_success() {
+        return Err(format!("HTTP error: {}", response.status()).into());
+    }
+
+    let bytes = response.bytes().await?;
+    fs::write(filepath, bytes)?;
+    
+    Ok(())
+}
+
+/// Parses a gzipped DBLP XML dump file and extracts publication records.
+///
+/// This function uses streaming XML parsing to handle large files efficiently.
+/// It filters records to only include those within the specified date range.
+///
+/// # Arguments
+///
+/// * `filepath` - Path to the gzipped XML file
+/// * `start_date` - Start of date range filter
+/// * `end_date` - End of date range filter
+/// * `producer` - Queue producer to submit parsed records
+///
+/// # Returns
+///
+/// Returns the number of records parsed, or an error.
+fn parse_xml_dump(
+    filepath: &Path,
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
+    producer: &QueueProducer<PublicationRecord>,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let file = fs::File::open(filepath)?;
+    let buf_reader = BufReader::new(file);
+    let gz_decoder = GzDecoder::new(buf_reader);
+    let buf_gz_reader = BufReader::new(gz_decoder);
+    let mut reader = Reader::from_reader(buf_gz_reader);
+    reader.config_mut().trim_text(true);
+
+    let mut count = 0;
+    let mut buf = Vec::new();
+    
+    // Current publication being parsed
+    let mut current_pub: Option<XmlPublication> = None;
+    let mut current_text = String::new();
+    let mut in_author = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let name = e.name();
+                match name.as_ref() {
+                    b"article" | b"inproceedings" | b"proceedings" | b"book" 
+                    | b"incollection" | b"phdthesis" | b"mastersthesis" => {
+                        // Start of a new publication
+                        let key = e.attributes()
+                            .filter_map(|a| a.ok())
+                            .find(|a| a.key.as_ref() == b"key")
+                            .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
+                        
+                        current_pub = Some(XmlPublication {
+                            key: key.unwrap_or_else(|| "unknown".to_string()),
+                            title: None,
+                            authors: Vec::new(),
+                            year: None,
+                            venue: None,
+                        });
+                    }
+                    b"author" => {
+                        in_author = true;
+                        current_text.clear();
+                    }
+                    b"title" | b"year" | b"journal" | b"booktitle" => {
+                        current_text.clear();
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(e)) => {
+                // Decode HTML entities like &amp; to &
+                let text = std::str::from_utf8(e.as_ref()).unwrap_or("");
+                if let Ok(unescaped) = quick_unescape(text) {
+                    current_text.push_str(&unescaped);
+                }
+            }
+            Ok(Event::End(e)) => {
+                let name = e.name();
+                match name.as_ref() {
+                    b"article" | b"inproceedings" | b"proceedings" | b"book" 
+                    | b"incollection" | b"phdthesis" | b"mastersthesis" => {
+                        // End of publication - convert and submit if valid
+                        if let Some(pub_data) = current_pub.take() {
+                            if let Some(record) = convert_xml_to_record(pub_data, start_date, end_date) {
+                                if let Err(e) = producer.submit(record) {
+                                    logger::error(&format!("Failed to submit record: {}", e));
+                                } else {
+                                    count += 1;
+                                }
+                            }
+                        }
+                    }
+                    b"author" => {
+                        if in_author {
+                            if let Some(ref mut pub_data) = current_pub {
+                                pub_data.authors.push(current_text.trim().to_string());
+                            }
+                            in_author = false;
+                            current_text.clear();
+                        }
+                    }
+                    b"title" => {
+                        if let Some(ref mut pub_data) = current_pub {
+                            pub_data.title = Some(current_text.trim().to_string());
+                        }
+                        current_text.clear();
+                    }
+                    b"year" => {
+                        if let Some(ref mut pub_data) = current_pub {
+                            pub_data.year = current_text.trim().parse().ok();
+                        }
+                        current_text.clear();
+                    }
+                    b"journal" | b"booktitle" => {
+                        if let Some(ref mut pub_data) = current_pub {
+                            if pub_data.venue.is_none() {
+                                pub_data.venue = Some(current_text.trim().to_string());
+                            }
+                        }
+                        current_text.clear();
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                logger::warn(&format!("XML parse error at position {}: {}", reader.buffer_position(), e));
+                // Continue parsing despite errors
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(count)
+}
+
+/// Intermediate structure for parsing XML publications
+#[derive(Debug)]
+struct XmlPublication {
+    key: String,
+    title: Option<String>,
+    authors: Vec<String>,
+    year: Option<u32>,
+    venue: Option<String>,
+}
+
+/// Converts an XML publication to a PublicationRecord.
+///
+/// Returns `None` if the record doesn't meet requirements (missing fields,
+/// outside date range, etc.).
+fn convert_xml_to_record(
+    pub_data: XmlPublication,
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
+) -> Option<PublicationRecord> {
+    // Check required fields
+    let title = pub_data.title?;
+    let year = pub_data.year?;
+    
+    if title.trim().is_empty() || pub_data.authors.is_empty() {
+        return None;
+    }
+
+    // Filter by date range
+    let start_year = start_date.year() as u32;
+    let end_year = end_date.year() as u32;
+    
+    if year < start_year || year > end_year {
+        return None;
+    }
+
+    Some(PublicationRecord {
+        id: pub_data.key,
+        title,
+        authors: pub_data.authors,
+        year,
+        venue: pub_data.venue,
+        source: "dblp".to_string(),
+    })
+}
+
+/// Scrapes DBLP with the specified mode (Search API or XML dump).
+///
+/// This is a convenience function that dispatches to the appropriate
+/// implementation based on the mode.
+///
+/// # Arguments
+///
+/// * `start_date` - The start of the date range (inclusive).
+/// * `end_date` - The end of the date range (inclusive).
+/// * `mode` - The scraping mode (Search or Xml).
+/// * `config` - The `DblpSourceConfig` to use for the scraper.
+/// * `producer` - Queue producer to submit parsed records.
+///
+/// # Returns
+///
+/// Returns a `Result` indicating success or failure.
+pub async fn scrape_range_with_mode(
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
+    mode: DblpMode,
+    config: DblpSourceConfig,
+    producer: QueueProducer<PublicationRecord>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match mode {
+        DblpMode::Search => scrape_range_with_config(start_date, end_date, config, producer).await,
+        DblpMode::Xml => scrape_range_xml(start_date, end_date, config, producer).await,
+    }
 }

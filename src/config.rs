@@ -189,6 +189,12 @@ pub struct DblpSourceConfig {
     /// Duration of longer pause in milliseconds
     #[serde(default = "default_dblp_long_pause_ms")]
     pub long_pause_ms: u64,
+    /// Base URL for XML dumps
+    #[serde(default = "default_dblp_xml_base_url")]
+    pub xml_base_url: String,
+    /// Directory to temporarily store downloaded XML files
+    #[serde(default = "default_dblp_xml_download_dir")]
+    pub xml_download_dir: String,
 }
 
 impl Default for DblpSourceConfig {
@@ -201,6 +207,8 @@ impl Default for DblpSourceConfig {
             cache_dir: default_dblp_cache_dir(),
             long_pause_frequency: default_dblp_long_pause_frequency(),
             long_pause_ms: default_dblp_long_pause_ms(),
+            xml_base_url: default_dblp_xml_base_url(),
+            xml_download_dir: default_dblp_xml_download_dir(),
         }
     }
 }
@@ -225,6 +233,12 @@ fn default_dblp_long_pause_frequency() -> usize {
 }
 fn default_dblp_long_pause_ms() -> u64 {
     2000
+}
+fn default_dblp_xml_base_url() -> String {
+    "https://dblp.org/xml".to_string()
+}
+fn default_dblp_xml_download_dir() -> String {
+    ".dblp_xml_downloads".to_string()
 }
 
 #[derive(Deserialize, Clone, Debug)]
