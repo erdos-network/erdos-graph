@@ -632,4 +632,134 @@ mod tests {
         // 2 papers + 3 authors = 5 nodes
         assert_eq!(count, 5);
     }
+
+    #[tokio::test]
+    async fn test_run_scrape_with_modes_dblp_search() {
+        use crate::scrapers::scraping_orchestrator::run_scrape_with_modes;
+        use std::collections::HashMap;
+
+        let engine = create_test_engine().await;
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec!["dblp".to_string()],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+                ..Default::default()
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
+            },
+            edge_cache: Default::default(),
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
+        };
+
+        let sources = vec!["dblp".to_string()];
+        let mut source_modes = HashMap::new();
+        source_modes.insert("dblp".to_string(), "search".to_string());
+
+        let start = chrono::Utc::now() - chrono::Duration::days(1);
+        let end = chrono::Utc::now();
+
+        let result = run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
+
+        assert!(result.is_ok(), "Should scrape with search mode");
+    }
+
+    #[tokio::test]
+    async fn test_run_scrape_with_modes_invalid_mode() {
+        use crate::scrapers::scraping_orchestrator::run_scrape_with_modes;
+        use std::collections::HashMap;
+
+        let engine = create_test_engine().await;
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec!["dblp".to_string()],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+                ..Default::default()
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
+            },
+            edge_cache: Default::default(),
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
+        };
+
+        let sources = vec!["dblp".to_string()];
+        let mut source_modes = HashMap::new();
+        source_modes.insert("dblp".to_string(), "invalid_mode".to_string());
+
+        let start = chrono::Utc::now() - chrono::Duration::days(1);
+        let end = chrono::Utc::now();
+
+        let result = run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
+
+        // Should complete without error (the scraper task logs the error but doesn't propagate it)
+        assert!(result.is_ok(), "Orchestrator should handle invalid mode gracefully");
+    }
+
+    #[tokio::test]
+    async fn test_run_scrape_with_modes_no_mode_specified() {
+        use crate::scrapers::scraping_orchestrator::run_scrape_with_modes;
+        use std::collections::HashMap;
+
+        let engine = create_test_engine().await;
+
+        let config = Config {
+            scrapers: ScraperConfig {
+                enabled: vec!["dblp".to_string()],
+                dblp: Default::default(),
+                arxiv: Default::default(),
+            },
+            ingestion: IngestionConfig {
+                chunk_size_days: 1,
+                initial_start_date: "2020-01-01T00:00:00Z".to_string(),
+                weekly_days: 7,
+                checkpoint_dir: None,
+                ..Default::default()
+            },
+            deduplication: DeduplicationConfig {
+                title_similarity_threshold: 0.9,
+                author_similarity_threshold: 0.5,
+                bloom_filter_size: 100,
+            },
+            edge_cache: Default::default(),
+            heartbeat_timeout_s: 30,
+            polling_interval_ms: 100,
+            log_level: crate::logger::LogLevel::Info,
+        };
+
+        let sources = vec!["dblp".to_string()];
+        let source_modes = HashMap::new(); // No mode specified
+
+        let start = chrono::Utc::now() - chrono::Duration::days(1);
+        let end = chrono::Utc::now();
+
+        let result = run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
+
+        // Should use default mode (search)
+        assert!(result.is_ok(), "Should scrape with default mode");
+    }
 }

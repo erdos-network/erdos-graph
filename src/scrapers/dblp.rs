@@ -111,6 +111,7 @@ impl Scraper for DblpScraper {
     /// Scrapes DBLP for publications within the given date range.
     ///
     /// This method delegates to `scrape_range_with_config` using the scraper's configuration.
+    /// By default, uses the Search API mode.
     async fn scrape_range(
         &self,
         start: DateTime<Utc>,
@@ -118,6 +119,29 @@ impl Scraper for DblpScraper {
         producer: QueueProducer<PublicationRecord>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         scrape_range_with_config(start, end, self.config.clone(), producer).await
+    }
+
+    /// Scrapes DBLP with a specific mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The start of the date range (inclusive).
+    /// * `end` - The end of the date range (inclusive).
+    /// * `mode` - The scraping mode: "search" for API queries, "xml" for XML dumps.
+    /// * `producer` - Queue producer to submit parsed records.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` indicating success or failure.
+    async fn scrape_range_with_mode(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        mode: &str,
+        producer: QueueProducer<PublicationRecord>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let dblp_mode = DblpMode::from_str(mode)?;
+        scrape_range_with_mode(start, end, dblp_mode, self.config.clone(), producer).await
     }
 }
 
