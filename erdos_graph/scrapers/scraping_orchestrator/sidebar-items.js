@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["run_scrape"]};
+window.SIDEBAR_ITEMS = {"fn":["run_scrape","run_scrape_with_modes"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["scrape_chunk_with_config","scrape_range","scrape_range_with_config"],"struct":["ZbmathConfig","ZbmathScraper"]};
+window.SIDEBAR_ITEMS = {"fn":["scrape_chunk_with_config","scrape_range","scrape_range_with_config"],"struct":["ZbmathScraper"]};
