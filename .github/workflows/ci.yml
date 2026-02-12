@@ -84,7 +84,7 @@ jobs:
       - name: Install llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage reports and check threshold
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info --html --fail-under-lines 80
+        run: cargo llvm-cov --all-features --workspace --html --fail-under-lines 80
       - name: Upload HTML coverage report as artifact
         uses: actions/upload-artifact@v4
         with:
