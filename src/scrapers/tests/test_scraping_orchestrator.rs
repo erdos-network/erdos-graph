@@ -687,7 +687,7 @@ mod tests {
         };
 
         // Point to mock server and disable delays
-        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.base_url = mock_server.uri().to_string();
         config.scrapers.dblp.delay_ms = 0;
         config.scrapers.dblp.retry_delay_ms = 0;
         config.scrapers.dblp.long_pause_ms = 0;
@@ -804,7 +804,7 @@ mod tests {
         };
 
         // Point to mock server and disable delays
-        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.base_url = mock_server.uri().to_string();
         config.scrapers.dblp.delay_ms = 0;
         config.scrapers.dblp.retry_delay_ms = 0;
         config.scrapers.dblp.long_pause_ms = 0;

@@ -90,7 +90,7 @@ mod tests {
         };
 
         // Point to mock server and disable delays
-        config.scrapers.arxiv.base_url = format!("{}", mock_server.uri());
+        config.scrapers.arxiv.base_url = mock_server.uri().to_string();
         config.scrapers.arxiv.delay_ms = 0;
 
         let result =
@@ -159,7 +159,7 @@ mod tests {
         };
 
         // Point to mock server and disable delays
-        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.base_url = mock_server.uri().to_string();
         config.scrapers.dblp.delay_ms = 0;
         config.scrapers.dblp.retry_delay_ms = 0;
         config.scrapers.dblp.long_pause_ms = 0;
@@ -244,12 +244,12 @@ mod tests {
             log_level: crate::logger::LogLevel::Info,
         };
 
-        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.base_url = mock_server.uri().to_string();
         config.scrapers.dblp.delay_ms = 0;
         config.scrapers.dblp.long_pause_ms = 0;
         config.scrapers.dblp.retry_delay_ms = 0;
 
-        config.scrapers.arxiv.base_url = format!("{}", mock_arxiv_server.uri());
+        config.scrapers.arxiv.base_url = mock_arxiv_server.uri().to_string();
         config.scrapers.arxiv.delay_ms = 0;
 
         let result =
@@ -323,7 +323,7 @@ mod tests {
         };
 
         // Point to mock server and disable delays
-        config.scrapers.arxiv.base_url = format!("{}", mock_server.uri());
+        config.scrapers.arxiv.base_url = mock_server.uri().to_string();
         config.scrapers.arxiv.delay_ms = 0;
 
         let checkpoint_before = get_checkpoint("arxiv", &checkpoint_dir)?;
@@ -424,7 +424,7 @@ mod tests {
         };
 
         // Point to mock server and disable delays
-        config.scrapers.arxiv.base_url = format!("{}", mock_server.uri());
+        config.scrapers.arxiv.base_url = mock_server.uri().to_string();
         config.scrapers.arxiv.delay_ms = 0;
 
         let result =
@@ -492,7 +492,7 @@ mod tests {
         };
 
         // Point to mock server and disable delays
-        config.scrapers.arxiv.base_url = format!("{}", mock_server.uri());
+        config.scrapers.arxiv.base_url = mock_server.uri().to_string();
         config.scrapers.arxiv.delay_ms = 0;
 
         let recent_checkpoint = Utc::now() - Duration::days(1);
@@ -671,7 +671,7 @@ mod tests {
             log_level: crate::logger::LogLevel::Info,
         };
 
-        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.base_url = mock_server.uri().to_string();
         config.scrapers.dblp.delay_ms = 0;
         config.scrapers.dblp.long_pause_ms = 0;
         config.scrapers.dblp.retry_delay_ms = 0;
@@ -762,12 +762,12 @@ mod tests {
             log_level: crate::logger::LogLevel::Info,
         };
 
-        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.base_url = mock_server.uri().to_string();
         config.scrapers.dblp.delay_ms = 0;
         config.scrapers.dblp.long_pause_ms = 0;
         config.scrapers.dblp.retry_delay_ms = 0;
 
-        config.scrapers.arxiv.base_url = format!("{}", mock_arxiv_server.uri());
+        config.scrapers.arxiv.base_url = mock_arxiv_server.uri().to_string();
         config.scrapers.arxiv.delay_ms = 0;
 
         let result = orchestrate_scraping_and_ingestion(
