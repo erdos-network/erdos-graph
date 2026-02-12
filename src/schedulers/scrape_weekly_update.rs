@@ -38,8 +38,20 @@ pub async fn start_weekly_scraper(
         Box::pin(async move {
             println!("Starting weekly scrape for sources: {:?}", sources);
 
-            match orchestrate_scraping_and_ingestion("weekly", sources.clone(), datastore, &config)
-                .await
+            // Use search mode for DBLP in weekly updates (faster for small date ranges)
+            let mut source_modes = std::collections::HashMap::new();
+            if sources.contains(&"dblp".to_string()) {
+                source_modes.insert("dblp".to_string(), "search".to_string());
+            }
+
+            match orchestrate_scraping_and_ingestion(
+                "weekly",
+                sources.clone(),
+                Some(source_modes),
+                datastore,
+                &config,
+            )
+            .await
             {
                 Ok(_) => println!(
                     "Weekly scrape completed successfully for sources: {:?}",

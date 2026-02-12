@@ -4,7 +4,6 @@ mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
 
-    /// Test basic publication record creation.
     #[test]
     fn test_publication_record_creation() {
         let record = PublicationRecord {
@@ -28,18 +27,15 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let base_path = temp_dir.path();
 
-        // Save checkpoint
         let save_result = set_checkpoint(source, test_date, base_path);
         assert!(save_result.is_ok());
 
-        // Load checkpoint
         let load_result = get_checkpoint(source, base_path);
         assert!(load_result.is_ok());
 
         let loaded_date = load_result.unwrap();
         assert!(loaded_date.is_some());
 
-        // Dates should match (within a second due to serialization)
         let diff = (loaded_date.unwrap() - test_date).num_seconds().abs();
         assert!(diff < 2);
     }
@@ -66,7 +62,6 @@ mod tests {
             source: "dblp".to_string(),
         };
 
-        // Test JSON serialization
         let json = serde_json::to_string(&record).unwrap();
         let deserialized: PublicationRecord = serde_json::from_str(&json).unwrap();
 

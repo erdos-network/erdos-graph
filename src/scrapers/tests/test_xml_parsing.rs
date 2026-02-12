@@ -86,6 +86,7 @@ struct OaiError {
 mod tests {
     use super::*;
 
+    /// Test basic XML parsing of OAI-PMH response.
     #[test]
     fn test_xml_parsing() {
         let xml_data = r#"<?xml version="1.0" encoding="utf-8"?>

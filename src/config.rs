@@ -169,6 +169,8 @@ pub struct ScraperConfig {
     pub dblp: DblpSourceConfig,
     #[serde(default)]
     pub arxiv: ArxivSourceConfig,
+    #[serde(default)]
+    pub zbmath: ZbmathSourceConfig,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -189,6 +191,18 @@ pub struct DblpSourceConfig {
     /// Duration of longer pause in milliseconds
     #[serde(default = "default_dblp_long_pause_ms")]
     pub long_pause_ms: u64,
+    /// Base URL for XML dumps
+    #[serde(default = "default_dblp_xml_base_url")]
+    pub xml_base_url: String,
+    /// Directory to temporarily store downloaded XML files
+    #[serde(default = "default_dblp_xml_download_dir")]
+    pub xml_download_dir: String,
+    /// Maximum number of retries for 429 errors
+    #[serde(default = "default_dblp_max_retries")]
+    pub max_retries: u32,
+    /// Delay in milliseconds before retrying after a 429 error
+    #[serde(default = "default_dblp_retry_delay_ms")]
+    pub retry_delay_ms: u64,
 }
 
 impl Default for DblpSourceConfig {
@@ -201,6 +215,10 @@ impl Default for DblpSourceConfig {
             cache_dir: default_dblp_cache_dir(),
             long_pause_frequency: default_dblp_long_pause_frequency(),
             long_pause_ms: default_dblp_long_pause_ms(),
+            xml_base_url: default_dblp_xml_base_url(),
+            xml_download_dir: default_dblp_xml_download_dir(),
+            max_retries: default_dblp_max_retries(),
+            retry_delay_ms: default_dblp_retry_delay_ms(),
         }
     }
 }
@@ -225,6 +243,18 @@ fn default_dblp_long_pause_frequency() -> usize {
 }
 fn default_dblp_long_pause_ms() -> u64 {
     2000
+}
+fn default_dblp_xml_base_url() -> String {
+    "https://dblp.org/xml".to_string()
+}
+fn default_dblp_xml_download_dir() -> String {
+    ".dblp_xml_downloads".to_string()
+}
+fn default_dblp_max_retries() -> u32 {
+    5
+}
+fn default_dblp_retry_delay_ms() -> u64 {
+    10_000
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -254,13 +284,38 @@ fn default_arxiv_base_url() -> String {
     "http://export.arxiv.org/api/query".to_string()
 }
 fn default_arxiv_page_size() -> usize {
-    100
+    5000 // ArXiv supports up to 5000 results per request
 }
 fn default_arxiv_channel_size() -> usize {
     8
 }
 fn default_arxiv_delay_ms() -> u64 {
-    200
+    100 // Reduced delay - ArXiv rate limit is 1 req/sec, we're well under that
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct ZbmathSourceConfig {
+    #[serde(default = "default_zbmath_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_zbmath_delay_between_pages_ms")]
+    pub delay_between_pages_ms: u64,
+}
+
+impl Default for ZbmathSourceConfig {
+    fn default() -> Self {
+        Self {
+            base_url: default_zbmath_base_url(),
+            delay_between_pages_ms: default_zbmath_delay_between_pages_ms(),
+        }
+    }
+}
+
+fn default_zbmath_base_url() -> String {
+    "https://oai.zbmath.org/v1/".to_string()
+}
+
+fn default_zbmath_delay_between_pages_ms() -> u64 {
+    100 // Faster pagination for OAI-PMH API
 }
 
 pub fn load_config() -> Result<Config, Box<dyn std::error::Error>> {

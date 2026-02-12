@@ -12,4 +12,19 @@ pub trait Scraper: Send + Sync {
         end: DateTime<Utc>,
         producer: QueueProducer<PublicationRecord>,
     ) -> Result<(), Box<dyn std::error::Error>>;
+
+    /// Scrape publications with a specific mode (optional, for scrapers that support multiple modes).
+    ///
+    /// Default implementation calls `scrape_range` and ignores the mode parameter.
+    /// Scrapers that support modes (like DBLP with "search" vs "xml") should override this.
+    async fn scrape_range_with_mode(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        _mode: &str,
+        producer: QueueProducer<PublicationRecord>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Default implementation ignores mode and calls regular scrape_range
+        self.scrape_range(start, end, producer).await
+    }
 }

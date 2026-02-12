@@ -52,16 +52,30 @@ impl Scraper for ArxivScraper {
 }
 
 // Normalize text nodes: strip CDATA markers and unescape XML entities.
+// Optimized to minimize allocations
 fn normalize_text(txt: &str) -> String {
     let s = txt.trim();
+    if s.is_empty() {
+        return String::new();
+    }
     if s.starts_with("<![CDATA[") && s.ends_with("]]>") {
         let inner = &s[9..s.len() - 3];
         return inner.trim().to_string();
     }
-    if let Ok(cow) = quick_unescape(s) {
-        return cow.into_owned().trim().to_string();
+    // quick_unescape returns Cow - only allocates if unescaping is needed
+    match quick_unescape(s) {
+        Ok(cow) => {
+            let unescaped = cow.as_ref();
+            if unescaped == s {
+                // No unescaping was needed, just return trimmed original
+                s.to_string()
+            } else {
+                // Unescaping happened, trim the result
+                unescaped.trim().to_string()
+            }
+        }
+        Err(_) => s.to_string(),
     }
-    s.to_string()
 }
 
 // Extract the `term` attribute (or namespaced variant) from a start element's
@@ -150,20 +164,10 @@ fn parse_entry_str(
     let mut cur_id: Option<String> = None;
     let mut cur_title: Option<String> = None;
     let mut cur_published: Option<String> = None;
+    let mut cur_updated: Option<String> = None;
     let mut cur_journal_ref: Option<String> = None;
     let mut cur_primary_cat: Option<String> = None;
     let mut cur_authors: Vec<String> = Vec::new();
-
-    // Pre-scan for primary_category attribute to handle odd namespace placement
-    if cur_primary_cat.is_none()
-        && let Some(idx) = entry_str.find("primary_category")
-        && let Some(term_pos) = entry_str[idx..].find("term=\"")
-    {
-        let start = idx + term_pos + "term=\"".len();
-        if let Some(endpos) = entry_str[start..].find('"') {
-            cur_primary_cat = Some(entry_str[start..start + endpos].to_string());
-        }
-    }
 
     // Main XML event loop to populate entry fields
     loop {
@@ -190,6 +194,12 @@ fn parse_entry_str(
                     b"published" if inside_entry => {
                         if let Ok(txt) = reader.read_text(e.name()) {
                             cur_published = Some(normalize_text(&txt));
+                        }
+                    }
+                    // Capture the last updated timestamp (RFC3339 expected).
+                    b"updated" if inside_entry => {
+                        if let Ok(txt) = reader.read_text(e.name()) {
+                            cur_updated = Some(normalize_text(&txt));
                         }
                     }
                     // Capture a `journal_ref` if present; this takes precedence
@@ -227,21 +237,38 @@ fn parse_entry_str(
                 // build and return a `PublicationRecord` populated from the
                 // fields we've accumulated.
                 if e.local_name().as_ref() == b"entry" {
-                    // Check if published date is valid and within range
-                    let published_str = cur_published.as_ref()?;
-                    let published_dt = DateTime::parse_from_rfc3339(published_str).ok()?;
-                    let published_utc = published_dt.with_timezone(&Utc);
+                    // Use updated date for filtering (since we query by lastUpdatedDate)
+                    // but fall back to published date if updated is not available
+                    let date_str = cur_updated.as_ref().or(cur_published.as_ref())?;
+                    let date_dt = DateTime::parse_from_rfc3339(date_str).ok()?;
+                    let date_utc = date_dt.with_timezone(&Utc);
 
-                    if published_utc < start_date || published_utc >= end_date {
+                    if date_utc < start_date || date_utc >= end_date {
                         return None;
                     }
 
+                    // For the year field, use the published date (not updated)
+                    let published_str = cur_published.as_ref()?;
+                    let published_dt = DateTime::parse_from_rfc3339(published_str).ok()?;
+                    let published_utc = published_dt.with_timezone(&Utc);
                     let year = published_utc.year() as u32;
+
+                    // Fallback: if XML parser didn't find primary_category, try substring search
+                    // This handles edge cases with malformed XML
+                    if cur_primary_cat.is_none()
+                        && let Some(idx) = entry_str.find("primary_category")
+                        && let Some(term_pos) = entry_str[idx..].find("term=\"")
+                    {
+                        let start = idx + term_pos + "term=\"".len();
+                        if let Some(endpos) = entry_str[start..].find('"') {
+                            cur_primary_cat = Some(entry_str[start..start + endpos].to_string());
+                        }
+                    }
 
                     return Some(PublicationRecord {
                         id: cur_id.take().unwrap_or_default(),
                         title: cur_title.take().unwrap_or_default(),
-                        authors: cur_authors.clone(),
+                        authors: std::mem::take(&mut cur_authors),
                         year,
                         // Prefer journal reference; fall back to primary
                         // category when journal_ref is absent.
@@ -377,10 +404,11 @@ pub async fn scrape_range_with_config_async(
         logger::debug(&format!("Fetching ArXiv page: {}", url));
 
         let mut resp = client.get(&url).send().await?;
-        // when to stop (arXiv returns fewer than page_size when exhausted)
+        // When to stop (arXiv returns fewer than page_size when exhausted)
         // Remember how many results we processed in this page
         let mut page_record_count = 0;
-        let mut buf_acc: Vec<u8> = Vec::new();
+        // Pre-allocate buffer: ~2KB per entry average, so for 5000 entries = ~10MB
+        let mut buf_acc: Vec<u8> = Vec::with_capacity(10 * 1024 * 1024);
 
         loop {
             match resp.chunk().await? {
@@ -398,7 +426,6 @@ pub async fn scrape_range_with_config_async(
         }
 
         // Process any remaining complete entries after EOF
-        // Process any remaining complete entries after EOF
         extract_complete_entries(
             &mut buf_acc,
             start_date,
@@ -409,8 +436,8 @@ pub async fn scrape_range_with_config_async(
 
         sleep(Duration::from_millis(delay_ms)).await;
 
-        // If fewer entries were added than page_size, we've reached the end
-        drop(resp); // Close response to free resources
+        // Close response to free resources
+        drop(resp);
 
         // If fewer entries were added than page_size, we've reached the end
         logger::debug(&format!(
