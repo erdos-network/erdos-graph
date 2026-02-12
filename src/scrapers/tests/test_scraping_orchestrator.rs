@@ -11,12 +11,15 @@ mod tests {
     use helix_db::helix_engine::storage_core::HelixGraphStorage;
     use helix_db::helix_engine::traversal_core::{HelixGraphEngine, HelixGraphEngineOpts};
     use helix_db::protocol::value::Value as HelixValue;
+    use serde_json::json;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration as StdDuration;
     use tempfile::TempDir;
     use tokio::sync::Mutex;
     use tokio::time::{Instant, sleep};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[allow(clippy::field_reassign_with_default)]
     async fn create_test_engine() -> Arc<HelixGraphEngine> {
@@ -641,7 +644,24 @@ mod tests {
 
         let engine = create_test_engine().await;
 
-        let config = Config {
+        // Start mock server
+        let mock_server = MockServer::start().await;
+
+        // Mock DBLP empty response
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "result": {
+                    "hits": {
+                        "hit": [],
+                        "@sent": "0",
+                        "@total": "0"
+                    }
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let mut config = Config {
             scrapers: ScraperConfig {
                 enabled: vec!["dblp".to_string()],
                 dblp: Default::default(),
@@ -665,6 +685,12 @@ mod tests {
             polling_interval_ms: 100,
             log_level: crate::logger::LogLevel::Info,
         };
+
+        // Point to mock server and disable delays
+        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.delay_ms = 0;
+        config.scrapers.dblp.retry_delay_ms = 0;
+        config.scrapers.dblp.long_pause_ms = 0;
 
         let sources = vec!["dblp".to_string()];
         let mut source_modes = HashMap::new();
@@ -735,7 +761,24 @@ mod tests {
 
         let engine = create_test_engine().await;
 
-        let config = Config {
+        // Start mock server
+        let mock_server = MockServer::start().await;
+
+        // Mock DBLP empty response
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "result": {
+                    "hits": {
+                        "hit": [],
+                        "@sent": "0",
+                        "@total": "0"
+                    }
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let mut config = Config {
             scrapers: ScraperConfig {
                 enabled: vec!["dblp".to_string()],
                 dblp: Default::default(),
@@ -759,6 +802,12 @@ mod tests {
             polling_interval_ms: 100,
             log_level: crate::logger::LogLevel::Info,
         };
+
+        // Point to mock server and disable delays
+        config.scrapers.dblp.base_url = format!("{}", mock_server.uri());
+        config.scrapers.dblp.delay_ms = 0;
+        config.scrapers.dblp.retry_delay_ms = 0;
+        config.scrapers.dblp.long_pause_ms = 0;
 
         let sources = vec!["dblp".to_string()];
         let source_modes = HashMap::new(); // No mode specified

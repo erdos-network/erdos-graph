@@ -631,7 +631,8 @@ pub async fn scrape_range_xml(
             }
         }
         Err(e) => {
-            return Err(format!("Failed to download main DBLP dump: {}", e).into());
+            logger::error(&format!("Failed to download main DBLP dump: {}", e));
+            // Don't fail the whole operation on download failure - just log and continue
         }
     }
 
