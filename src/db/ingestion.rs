@@ -86,10 +86,8 @@ pub fn set_checkpoint(
 
 /// Orchestrates the complete scraping and ingestion process with chunked processing and checkpointing.
 ///
-/// This function:
-/// 1. Calculates start and end dates based on mode using `calculate_date_range`
-/// 2. Breaks the date range into chunks using `chunk_date_range`
-/// 3. Calls `run_scrape` for each chunk
+/// This function calculates start and end dates based on mode, breaks the date range into chunks,
+/// and calls `run_scrape` for each chunk.
 ///
 /// # Arguments
 /// * `mode` - Processing mode: "initial" (scrape last 10 years), "weekly" (incremental updates),
@@ -128,7 +126,7 @@ pub async fn orchestrate_scraping_and_ingestion(
     use crate::scrapers::scraping_orchestrator::run_scrape_with_modes;
 
     let source_modes = source_modes.unwrap_or_default();
-    
+
     logger::info(&format!(
         "Orchestrating scraping for sources: {:?} in mode: {} with source modes: {:?}",
         sources, mode, source_modes
@@ -142,7 +140,6 @@ pub async fn orchestrate_scraping_and_ingestion(
         .unwrap_or(&default_checkpoint_dir);
     let checkpoint_path = Path::new(checkpoint_dir);
 
-    // Calculate start and end dates based on mode (source-agnostic, uses earliest checkpoint)
     let (start_date, end_date) =
         calculate_date_range(mode, &sources, &config.ingestion, checkpoint_path)?;
 
@@ -151,7 +148,6 @@ pub async fn orchestrate_scraping_and_ingestion(
         start_date, end_date
     ));
 
-    // Break date range into chunks
     let chunks = chunk_date_range(start_date, end_date, config.ingestion.chunk_size_days)?;
     let total_chunks = chunks.len();
     logger::info(&format!(
@@ -159,7 +155,6 @@ pub async fn orchestrate_scraping_and_ingestion(
         total_chunks, config.ingestion.chunk_size_days
     ));
 
-    // Run run_scrape_with_modes for each chunk (all sources in parallel) and update checkpoints
     for (i, (chunk_start, chunk_end)) in chunks.into_iter().enumerate() {
         logger::info(&format!(
             "Processing chunk {}/{}: {} to {}",
@@ -169,7 +164,6 @@ pub async fn orchestrate_scraping_and_ingestion(
             chunk_end
         ));
 
-        // Pass sources list and modes to run_scrape_with_modes
         run_scrape_with_modes(
             chunk_start,
             chunk_end,
@@ -180,7 +174,6 @@ pub async fn orchestrate_scraping_and_ingestion(
         )
         .await?;
 
-        // Update checkpoints for all sources that were processed
         for src in &sources {
             set_checkpoint(src, chunk_end, checkpoint_path)?;
         }
@@ -210,7 +203,6 @@ fn calculate_date_range(
 ) -> Result<(DateTime<Utc>, DateTime<Utc>), Box<dyn std::error::Error>> {
     let now = Utc::now();
 
-    // Find the earliest checkpoint across all sources
     let mut earliest_checkpoint: Option<DateTime<Utc>> = None;
     for source in sources {
         if let Some(checkpoint) = get_checkpoint(source, base_path)? {
@@ -226,7 +218,7 @@ fn calculate_date_range(
             if let Some(checkpoint) = earliest_checkpoint {
                 checkpoint
             } else {
-                // Use the configured start date (Erdos' first known publication, January 1932)
+                // Use configured start date
                 DateTime::parse_from_rfc3339(&config.initial_start_date)?.with_timezone(&Utc)
             }
         }
@@ -241,7 +233,7 @@ fn calculate_date_range(
             if let Some(checkpoint) = earliest_checkpoint {
                 checkpoint
             } else {
-                // Start from a very early date (e.g., 1900)
+                // Start from early date
                 DateTime::parse_from_rfc3339("1900-01-01T00:00:00Z")?.with_timezone(&Utc)
             }
         }
@@ -271,7 +263,7 @@ pub(crate) fn chunk_date_range(
     }
 
     let mut chunks = Vec::new();
-    // Safety check: if chunk_size_days is 0, treat it as a single chunk for the entire range
+    // Handle zero chunk size
     if chunk_size_days == 0 {
         chunks.push((start, end));
         return Ok(chunks);

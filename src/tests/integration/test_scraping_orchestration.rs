@@ -34,6 +34,7 @@ mod tests {
                 enabled: vec!["arxiv".to_string()],
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -78,6 +79,7 @@ mod tests {
                 enabled: vec!["dblp".to_string()],
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,

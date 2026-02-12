@@ -917,31 +917,29 @@ mod tests {
         assert_eq!(recs2[0].title, "Paper V2"); // Should get fresh data, not cached V1
     }
 
-    // --- XML Mode Tests ---
-
     #[test]
     fn test_dblp_mode_from_str() {
         use crate::scrapers::dblp::DblpMode;
 
-        assert_eq!(DblpMode::from_str("search").unwrap(), DblpMode::Search);
-        assert_eq!(DblpMode::from_str("Search").unwrap(), DblpMode::Search);
-        assert_eq!(DblpMode::from_str("SEARCH").unwrap(), DblpMode::Search);
-        
-        assert_eq!(DblpMode::from_str("xml").unwrap(), DblpMode::Xml);
-        assert_eq!(DblpMode::from_str("Xml").unwrap(), DblpMode::Xml);
-        assert_eq!(DblpMode::from_str("XML").unwrap(), DblpMode::Xml);
-        
-        assert!(DblpMode::from_str("invalid").is_err());
-        assert!(DblpMode::from_str("").is_err());
+        assert_eq!("search".parse::<DblpMode>().unwrap(), DblpMode::Search);
+        assert_eq!("Search".parse::<DblpMode>().unwrap(), DblpMode::Search);
+        assert_eq!("SEARCH".parse::<DblpMode>().unwrap(), DblpMode::Search);
+
+        assert_eq!("xml".parse::<DblpMode>().unwrap(), DblpMode::Xml);
+        assert_eq!("Xml".parse::<DblpMode>().unwrap(), DblpMode::Xml);
+        assert_eq!("XML".parse::<DblpMode>().unwrap(), DblpMode::Xml);
+
+        assert!("invalid".parse::<DblpMode>().is_err());
+        assert!("".parse::<DblpMode>().is_err());
     }
 
     #[tokio::test]
     async fn test_dblp_xml_mode_basic() {
         use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
-        use tempfile::TempDir;
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let xml_download_dir = temp_dir.path().join("xml_downloads");
@@ -990,25 +988,28 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         let mut records = Vec::new();
         while let Some(r) = queue.dequeue() {
             records.push(r);
         }
-        
+
         assert_eq!(records.len(), 2);
-        
+
         // Check first record
         assert_eq!(records[0].title, "Test Article Title");
         assert_eq!(records[0].authors, vec!["John Doe"]);
         assert_eq!(records[0].year, 2023);
-        assert_eq!(records[0].venue, Some("Communications of the ACM".to_string()));
+        assert_eq!(
+            records[0].venue,
+            Some("Communications of the ACM".to_string())
+        );
         assert_eq!(records[0].source, "dblp");
-        
+
         // Check second record
         assert_eq!(records[1].title, "Another Test Paper");
         assert_eq!(records[1].authors, vec!["Jane Smith", "Bob Johnson"]);
@@ -1019,10 +1020,10 @@ mod tests {
     #[tokio::test]
     async fn test_dblp_xml_mode_filters_by_year() {
         use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
-        use tempfile::TempDir;
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let xml_download_dir = temp_dir.path().join("xml_downloads");
@@ -1075,16 +1076,16 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         let mut records = Vec::new();
         while let Some(r) = queue.dequeue() {
             records.push(r);
         }
-        
+
         // Should only get the 2023 paper
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].title, "Paper from 2023");
@@ -1094,10 +1095,10 @@ mod tests {
     #[tokio::test]
     async fn test_dblp_xml_mode_missing_fields() {
         use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
-        use tempfile::TempDir;
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let xml_download_dir = temp_dir.path().join("xml_downloads");
@@ -1153,16 +1154,16 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         let mut records = Vec::new();
         while let Some(r) = queue.dequeue() {
             records.push(r);
         }
-        
+
         // Should only get the valid record
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].title, "Valid Title");
@@ -1172,10 +1173,10 @@ mod tests {
     #[tokio::test]
     async fn test_dblp_xml_mode_multiple_months() {
         use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
-        use tempfile::TempDir;
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let xml_download_dir = temp_dir.path().join("xml_downloads");
@@ -1223,19 +1224,19 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         let mut records = Vec::new();
         while let Some(r) = queue.dequeue() {
             records.push(r);
         }
-        
+
         // Should get both papers
         assert_eq!(records.len(), 2);
-        
+
         let titles: Vec<&str> = records.iter().map(|r| r.title.as_str()).collect();
         assert!(titles.contains(&"January Paper"));
         assert!(titles.contains(&"February Paper"));
@@ -1268,27 +1269,27 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         // Should not fail, just log error and continue
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         let mut records = Vec::new();
         while let Some(r) = queue.dequeue() {
             records.push(r);
         }
-        
+
         assert_eq!(records.len(), 0);
     }
 
     #[tokio::test]
     async fn test_dblp_xml_mode_cleans_up_files() {
         use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
-        use tempfile::TempDir;
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let xml_download_dir = temp_dir.path().join("xml_downloads");
@@ -1327,23 +1328,26 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         // Check that the downloaded file was deleted
         let expected_file = xml_download_dir.join("dblp-2023-01-01.xml.gz");
-        assert!(!expected_file.exists(), "Downloaded file should be deleted after processing");
+        assert!(
+            !expected_file.exists(),
+            "Downloaded file should be deleted after processing"
+        );
     }
 
     #[tokio::test]
     async fn test_dblp_xml_mode_handles_special_characters() {
         use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
-        use tempfile::TempDir;
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let xml_download_dir = temp_dir.path().join("xml_downloads");
@@ -1384,16 +1388,16 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         let mut records = Vec::new();
         while let Some(r) = queue.dequeue() {
             records.push(r);
         }
-        
+
         assert_eq!(records.len(), 1);
         // Note: XML entities are decoded, but the title might have spacing issues
         // depending on how the XML parser handles entity boundaries
@@ -1405,10 +1409,10 @@ mod tests {
     #[tokio::test]
     async fn test_dblp_xml_mode_different_publication_types() {
         use crate::scrapers::dblp::{DblpMode, scrape_range_with_mode};
-        use tempfile::TempDir;
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
+        use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
         let xml_download_dir = temp_dir.path().join("xml_downloads");
@@ -1464,30 +1468,131 @@ mod tests {
 
         let queue = ThreadSafeQueue::new(QueueConfig::default());
         let producer = queue.create_producer();
-        
+
         let result = scrape_range_with_mode(start, end, DblpMode::Xml, config, producer).await;
-        
+
         assert!(result.is_ok());
-        
+
         let mut records = Vec::new();
         while let Some(r) = queue.dequeue() {
             records.push(r);
         }
-        
+
         // Should get all 4 publication types
         assert_eq!(records.len(), 4);
-        
+
         let titles: Vec<&str> = records.iter().map(|r| r.title.as_str()).collect();
         assert!(titles.contains(&"Journal Article"));
         assert!(titles.contains(&"Conference Paper"));
         assert!(titles.contains(&"Test Book"));
         assert!(titles.contains(&"PhD Thesis"));
-        
+
         // Check venues are captured correctly
-        let article = records.iter().find(|r| r.title == "Journal Article").unwrap();
+        let article = records
+            .iter()
+            .find(|r| r.title == "Journal Article")
+            .unwrap();
         assert_eq!(article.venue, Some("Test Journal".to_string()));
-        
-        let conf = records.iter().find(|r| r.title == "Conference Paper").unwrap();
+
+        let conf = records
+            .iter()
+            .find(|r| r.title == "Conference Paper")
+            .unwrap();
         assert_eq!(conf.venue, Some("Test Conference".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_dblp_rate_limiting_retry_success() {
+        let mut server = Server::new_async().await;
+
+        let record = json!({
+            "info": {
+                "title": "Retry Test",
+                "authors": {"author": ["Author"]},
+                "year": "2023",
+                "key": "retry/key"
+            }
+        });
+        let response_body = create_dblp_json_response(&[record]);
+
+        // First request returns 429
+        let _m1 = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(429)
+            .expect(1)
+            .create_async()
+            .await;
+
+        // Subsequent requests return 200
+        let _m2 = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_body(response_body)
+            .expect_at_least(1)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            retry_delay_ms: 1, // Fast retry for test
+            max_retries: 2,
+            enable_cache: false,
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+        let result = dblp::scrape_range_with_config(start, end, config, producer).await;
+
+        assert!(result.is_ok());
+        _m1.assert_async().await;
+        _m2.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_dblp_rate_limiting_max_retries_exceeded() {
+        let mut server = Server::new_async().await;
+
+        // Always return 429
+        let _m1 = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(429)
+            .expect_at_least(1)
+            .create_async()
+            .await;
+
+        let config = DblpSourceConfig {
+            base_url: server.url(),
+            page_size: 100,
+            delay_ms: 0,
+            retry_delay_ms: 1, // Fast retry for test
+            max_retries: 2,
+            enable_cache: false,
+            ..Default::default()
+        };
+
+        let start = Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap();
+
+        let queue = ThreadSafeQueue::new(QueueConfig::default());
+        let producer = queue.create_producer();
+
+        // scrape_range_with_config swallows errors from fetch_url_cached and logs them,
+        // but it should break the loop and return Ok.
+        let result = dblp::scrape_range_with_config(start, end, config, producer).await;
+
+        assert!(result.is_ok());
+        // Since it hit max retries, it should have logged error and broken the inner loop.
+        // It won't return Err from the top level because it continues to next queries,
+        // but it will break for that specific query.
+        _m1.assert_async().await;
     }
 }

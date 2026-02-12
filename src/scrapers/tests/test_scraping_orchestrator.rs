@@ -487,6 +487,7 @@ mod tests {
                 enabled: vec![],
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -574,6 +575,7 @@ mod tests {
                 enabled: vec![],
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -629,7 +631,6 @@ mod tests {
         // Count nodes
         let txn = engine.storage.graph_env.read_txn().unwrap();
         let count = engine.storage.nodes_db.len(&txn).unwrap();
-        // 2 papers + 3 authors = 5 nodes
         assert_eq!(count, 5);
     }
 
@@ -645,6 +646,7 @@ mod tests {
                 enabled: vec!["dblp".to_string()],
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -671,7 +673,8 @@ mod tests {
         let start = chrono::Utc::now() - chrono::Duration::days(1);
         let end = chrono::Utc::now();
 
-        let result = run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
+        let result =
+            run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
 
         assert!(result.is_ok(), "Should scrape with search mode");
     }
@@ -688,6 +691,7 @@ mod tests {
                 enabled: vec!["dblp".to_string()],
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -714,10 +718,14 @@ mod tests {
         let start = chrono::Utc::now() - chrono::Duration::days(1);
         let end = chrono::Utc::now();
 
-        let result = run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
+        let result =
+            run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
 
         // Should complete without error (the scraper task logs the error but doesn't propagate it)
-        assert!(result.is_ok(), "Orchestrator should handle invalid mode gracefully");
+        assert!(
+            result.is_ok(),
+            "Orchestrator should handle invalid mode gracefully"
+        );
     }
 
     #[tokio::test]
@@ -732,6 +740,7 @@ mod tests {
                 enabled: vec!["dblp".to_string()],
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -757,7 +766,8 @@ mod tests {
         let start = chrono::Utc::now() - chrono::Duration::days(1);
         let end = chrono::Utc::now();
 
-        let result = run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
+        let result =
+            run_scrape_with_modes(start, end, sources, source_modes, engine, &config).await;
 
         // Should use default mode (search)
         assert!(result.is_ok(), "Should scrape with default mode");

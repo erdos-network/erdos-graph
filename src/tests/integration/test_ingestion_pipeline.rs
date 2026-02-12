@@ -56,6 +56,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -76,7 +77,8 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("initial", sources.clone(), None, database, &config).await;
+            orchestrate_scraping_and_ingestion("initial", sources.clone(), None, database, &config)
+                .await;
 
         assert!(
             result.is_ok(),
@@ -106,6 +108,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 7,
@@ -129,7 +132,8 @@ mod tests {
         set_checkpoint("dblp", checkpoint_date, &checkpoint_dir)?;
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config)
+                .await;
 
         assert!(
             result.is_ok(),
@@ -160,6 +164,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 7,
@@ -180,7 +185,8 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config)
+                .await;
 
         let arxiv_checkpoint = get_checkpoint("arxiv", &checkpoint_dir)?;
         let dblp_checkpoint = get_checkpoint("dblp", &checkpoint_dir)?;
@@ -212,6 +218,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -255,7 +262,8 @@ mod tests {
         let first_checkpoint = checkpoint_after_first.unwrap();
 
         let result2 =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config)
+                .await;
         assert!(result2.is_ok(), "Second run failed: {:?}", result2.err());
 
         let checkpoint_after_second = get_checkpoint("arxiv", &checkpoint_dir)?;
@@ -291,6 +299,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 1,
@@ -311,7 +320,8 @@ mod tests {
         };
 
         let result =
-            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config).await;
+            orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, database, &config)
+                .await;
 
         assert!(
             result.is_ok(),
@@ -337,6 +347,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 365,
@@ -360,7 +371,8 @@ mod tests {
         set_checkpoint("arxiv", recent_checkpoint, &checkpoint_dir)?;
 
         let result =
-            orchestrate_scraping_and_ingestion("full", sources.clone(), None, database, &config).await;
+            orchestrate_scraping_and_ingestion("full", sources.clone(), None, database, &config)
+                .await;
 
         assert!(
             result.is_ok(),
@@ -377,9 +389,14 @@ mod tests {
         let sources = vec!["arxiv".to_string()];
         let config = Config::default();
 
-        let result =
-            orchestrate_scraping_and_ingestion("invalid_mode", sources.clone(), None, database, &config)
-                .await;
+        let result = orchestrate_scraping_and_ingestion(
+            "invalid_mode",
+            sources.clone(),
+            None,
+            database,
+            &config,
+        )
+        .await;
 
         assert!(result.is_err(), "Should fail with invalid mode");
         let error_msg = result.unwrap_err().to_string();
@@ -412,6 +429,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 7,
@@ -471,6 +489,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 7,
@@ -531,6 +550,7 @@ mod tests {
                 enabled: sources.clone(),
                 dblp: Default::default(),
                 arxiv: Default::default(),
+                zbmath: Default::default(),
             },
             ingestion: IngestionConfig {
                 chunk_size_days: 7,

@@ -2,20 +2,27 @@
     "scrapers": {
         "enabled": [
             "dblp",
-            "arxiv"
+            "arxiv",
+            "zbmath"
         ],
         "dblp": {
             "base_url": "https://dblp.org/search/publ/api",
-            "page_size": 5000,
+            "page_size": 1000,
             "delay_ms": 500,
-            "long_pause_frequency": 10,
-            "long_pause_ms": 1000
+            "long_pause_frequency": 5,
+            "long_pause_ms": 2000,
+            "max_retries": 5,
+            "retry_delay_ms": 10000
         },
         "arxiv": {
             "base_url": "https://export.arxiv.org/api/query",
-            "page_size": 5000,
+            "page_size": 2000,
             "channel_size": 8,
             "delay_ms": 200
+        },
+        "zbmath": {
+            "base_url": "https://oai.zbmath.org/v1/",
+            "delay_between_pages_ms": 100
         }
     },
     "ingestion": {

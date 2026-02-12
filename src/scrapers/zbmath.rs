@@ -1,3 +1,4 @@
+use crate::config::ZbmathSourceConfig;
 use crate::db::ingestion::PublicationRecord;
 use crate::logger;
 use crate::scrapers::scraper::Scraper;
@@ -8,24 +9,22 @@ use serde::Deserialize;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
 
-const ZBMATH_BASE_URL: &str = "https://oai.zbmath.org/v1/";
-
 /// ZbMATH scraper that implements the Scraper trait.
 #[derive(Clone, Debug)]
 pub struct ZbmathScraper {
-    pub config: ZbmathConfig,
+    pub config: ZbmathSourceConfig,
 }
 
 impl ZbmathScraper {
     /// Create a new ZbmathScraper with default configuration.
     pub fn new() -> Self {
         Self {
-            config: ZbmathConfig::default(),
+            config: ZbmathSourceConfig::default(),
         }
     }
 
     /// Create a new ZbmathScraper with custom configuration.
-    pub fn with_config(config: ZbmathConfig) -> Self {
+    pub fn with_config(config: ZbmathSourceConfig) -> Self {
         Self { config }
     }
 }
@@ -45,21 +44,6 @@ impl Scraper for ZbmathScraper {
         producer: QueueProducer<PublicationRecord>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         scrape_range_with_config(start, end, self.config.clone(), producer).await
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ZbmathConfig {
-    pub base_url: String,
-    pub delay_between_pages_ms: u64,
-}
-
-impl Default for ZbmathConfig {
-    fn default() -> Self {
-        Self {
-            base_url: ZBMATH_BASE_URL.to_string(),
-            delay_between_pages_ms: 500,
-        }
     }
 }
 
@@ -180,14 +164,20 @@ pub async fn scrape_range(
     end_date: DateTime<Utc>,
     producer: QueueProducer<PublicationRecord>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    scrape_range_with_config(start_date, end_date, ZbmathConfig::default(), producer).await
+    scrape_range_with_config(
+        start_date,
+        end_date,
+        ZbmathSourceConfig::default(),
+        producer,
+    )
+    .await
 }
 
 /// Scrapes publication records from zbMATH with custom configuration.
 pub async fn scrape_range_with_config(
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    config: ZbmathConfig,
+    config: ZbmathSourceConfig,
     producer: QueueProducer<PublicationRecord>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
@@ -202,27 +192,31 @@ pub async fn scrape_chunk_with_config(
     client: &reqwest::Client,
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-    config: &ZbmathConfig,
+    config: &ZbmathSourceConfig,
     producer: QueueProducer<PublicationRecord>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut resumption_token: Option<String> = None;
 
+    // Pre-format dates outside the loop to avoid repeated allocations
+    let from_date = start_date.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let until_date = end_date.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
     loop {
-        let mut params = vec![
-            ("verb", "ListRecords".to_string()),
-            ("metadataPrefix", "oai_dc".to_string()),
-        ];
+        let mut params = vec![("verb", "ListRecords"), ("metadataPrefix", "oai_dc")];
 
         if let Some(token) = &resumption_token {
             // Use resumption token for pagination
-            params.push(("resumptionToken", token.clone()));
+            params.push(("resumptionToken", token.as_str()));
         } else {
             // First request - use date range
-            params.push(("from", start_date.format("%Y-%m-%dT%H:%M:%SZ").to_string()));
-            params.push(("until", end_date.format("%Y-%m-%dT%H:%M:%SZ").to_string()));
+            params.push(("from", from_date.as_str()));
+            params.push(("until", until_date.as_str()));
         }
 
-        logger::debug(&format!("Fetching zbMATH records: {:?}", params));
+        logger::debug(&format!(
+            "Fetching zbMATH URL: {} with params: {:?}",
+            config.base_url, params
+        ));
 
         let response = client
             .get(&config.base_url)
@@ -241,7 +235,7 @@ pub async fn scrape_chunk_with_config(
                     match error.code.as_str() {
                         "noRecordsMatch" => {
                             // No records for this date range - that's okay
-                            logger::info(&format!(
+                            logger::debug(&format!(
                                 "No records found for date range {} to {}",
                                 start_date.format("%Y-%m-%d"),
                                 end_date.format("%Y-%m-%d")
@@ -294,9 +288,10 @@ pub async fn scrape_chunk_with_config(
                 }
             }
 
-            // Check for pagination
+            // Check for pagination - use take to avoid cloning
             resumption_token = list_records.resumption_token;
-            if resumption_token.is_none() || resumption_token.as_ref().unwrap().is_empty() {
+            if resumption_token.is_none() || resumption_token.as_ref().is_none_or(|t| t.is_empty())
+            {
                 // No more pages
                 break;
             }
@@ -327,27 +322,34 @@ pub(crate) fn convert_to_publication_record(
     let title = dc.title.unwrap_or_else(|| "Unknown Title".to_string());
     let id = record.header.identifier;
 
-    // Parse authors from creator field
+    // Parse authors from creator field - optimized to minimize allocations
     let authors = if let Some(creator) = dc.creator {
         // zbMATH often has semicolon-separated authors
+        // Use split iterator directly to avoid intermediate Vec allocation
         creator
             .split(';')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
             .collect()
     } else {
         vec![]
     };
 
-    // Extract year from date field
+    // Extract year from date field - optimized parsing
     let year = if let Some(date_str) = dc.date {
         let date_str = date_str.trim();
         if date_str.len() < 4 {
             return Ok(None);
         }
-        // Try to parse year from various date formats
-        if let Ok(year_match) = date_str.chars().take(4).collect::<String>().parse::<u32>() {
-            year_match
+        // Parse first 4 characters as year - use slice instead of take+collect
+        if let Ok(year_val) = date_str[0..4].parse::<u32>() {
+            year_val
         } else {
             return Ok(None); // Skip records without valid year
         }

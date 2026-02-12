@@ -64,7 +64,7 @@ pub async fn run_scrape(
             let scraper: Box<dyn Scraper> = match src_name.as_str() {
                 "arxiv" => Box::new(ArxivScraper::with_config(scraper_config.arxiv)),
                 "dblp" => Box::new(DblpScraper::with_config(scraper_config.dblp)),
-                "zbmath" => Box::new(ZbmathScraper::new()), // Zbmath not updated yet
+                "zbmath" => Box::new(ZbmathScraper::with_config(scraper_config.zbmath)),
                 _ => {
                     logger::error(&format!("Unknown source: {}", src_name));
                     return;
@@ -224,7 +224,7 @@ pub async fn run_scrape_with_modes(
             let scraper: Box<dyn Scraper> = match src_name.as_str() {
                 "arxiv" => Box::new(ArxivScraper::with_config(scraper_config.arxiv)),
                 "dblp" => Box::new(DblpScraper::with_config(scraper_config.dblp)),
-                "zbmath" => Box::new(ZbmathScraper::new()),
+                "zbmath" => Box::new(ZbmathScraper::with_config(scraper_config.zbmath)),
                 _ => {
                     logger::error(&format!("Unknown source: {}", src_name));
                     return;
@@ -232,10 +232,12 @@ pub async fn run_scrape_with_modes(
             };
 
             logger::debug(&format!("{} scraper started", src_name));
-            
+
             let result = if let Some(mode_str) = mode {
                 logger::info(&format!("Using mode '{}' for {}", mode_str, src_name));
-                scraper.scrape_range_with_mode(start, end, &mode_str, producer).await
+                scraper
+                    .scrape_range_with_mode(start, end, &mode_str, producer)
+                    .await
             } else {
                 scraper.scrape_range(start, end, producer).await
             };

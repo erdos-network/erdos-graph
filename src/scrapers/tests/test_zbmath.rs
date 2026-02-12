@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
+    use crate::config::ZbmathSourceConfig;
     use crate::scrapers::zbmath::{DublinCore, Metadata, OaiPmh, Record, RecordHeader};
     use crate::scrapers::zbmath::{
-        ZbmathConfig, convert_to_publication_record, scrape_chunk_with_config,
-        scrape_range_with_config,
+        convert_to_publication_record, scrape_chunk_with_config, scrape_range_with_config,
     };
     use crate::utilities::thread_safe_queue::{QueueConfig, ThreadSafeQueue};
     use chrono::{TimeZone, Utc};
@@ -15,7 +15,7 @@ mod tests {
         end: chrono::DateTime<Utc>,
         mock_url: &str,
     ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
-        let config = ZbmathConfig {
+        let config = ZbmathSourceConfig {
             base_url: mock_url.to_string(),
             delay_between_pages_ms: 1, // Fast for tests
         };
@@ -37,7 +37,7 @@ mod tests {
         end: chrono::DateTime<Utc>,
         mock_url: &str,
     ) -> Result<Vec<crate::db::ingestion::PublicationRecord>, Box<dyn std::error::Error>> {
-        let config = ZbmathConfig {
+        let config = ZbmathSourceConfig {
             base_url: mock_url.to_string(),
             delay_between_pages_ms: 1,
         };
@@ -52,19 +52,19 @@ mod tests {
         Ok(results)
     }
 
-    /// Test ZbmathConfig Default implementation
+    /// Test ZbmathSourceConfig Default implementation
     #[test]
     fn test_zbmath_config_default() {
-        let config = ZbmathConfig::default();
+        let config = ZbmathSourceConfig::default();
 
         assert_eq!(config.base_url, "https://oai.zbmath.org/v1/");
-        assert_eq!(config.delay_between_pages_ms, 500);
+        assert_eq!(config.delay_between_pages_ms, 100);
     }
 
-    /// Test ZbmathConfig custom configuration
+    /// Test ZbmathSourceConfig custom configuration
     #[test]
     fn test_zbmath_config_custom() {
-        let config = ZbmathConfig {
+        let config = ZbmathSourceConfig {
             base_url: "https://custom-zbmath.example.com/".to_string(),
             delay_between_pages_ms: 1000,
         };
@@ -73,10 +73,10 @@ mod tests {
         assert_eq!(config.delay_between_pages_ms, 1000);
     }
 
-    /// Test ZbmathConfig Clone implementation
+    /// Test ZbmathSourceConfig Clone implementation
     #[test]
     fn test_zbmath_config_clone() {
-        let config1 = ZbmathConfig::default();
+        let config1 = ZbmathSourceConfig::default();
         let config2 = config1.clone();
 
         assert_eq!(config1.base_url, config2.base_url);
@@ -726,32 +726,20 @@ mod tests {
     }
 
     /// Test API rate limiting handling.
+    /// Test rate limiting handling.
     #[test]
     #[ignore = "Scraper not yet implemented"]
-    fn test_zbmath_rate_limiting() {
-        // TODO: Test that rate limiting is properly handled
-        // - Verify exponential backoff on 429 responses
-        // - Check that requests don't exceed API limits
-    }
+    fn test_zbmath_rate_limiting() {}
 
     /// Test pagination through large result sets.
     #[test]
     #[ignore = "Scraper not yet implemented"]
-    fn test_zbmath_pagination() {
-        // TODO: Test pagination logic
-        // - Verify all pages are fetched
-        // - Check that results are deduplicated across pages
-    }
+    fn test_zbmath_pagination() {}
 
     /// Test parsing of zbMATH-specific metadata.
     #[test]
     #[ignore = "Scraper not yet implemented"]
-    fn test_zbmath_metadata_parsing() {
-        // TODO: Test zbMATH-specific fields
-        // - MSC (Mathematics Subject Classification) codes
-        // - zbMATH ID format
-        // - Review text extraction (if applicable)
-    }
+    fn test_zbmath_metadata_parsing() {}
 
     /// Test scrape_range function with a date range
     #[tokio::test]
@@ -1165,7 +1153,7 @@ mod tests {
 
         let scraper = ZbmathScraper::new();
         assert_eq!(scraper.config.base_url, "https://oai.zbmath.org/v1/");
-        assert_eq!(scraper.config.delay_between_pages_ms, 500);
+        assert_eq!(scraper.config.delay_between_pages_ms, 100);
     }
 
     /// Test ZbmathScraper::with_config()
@@ -1173,7 +1161,7 @@ mod tests {
     fn test_zbmath_scraper_with_config() {
         use crate::scrapers::zbmath::ZbmathScraper;
 
-        let custom_config = ZbmathConfig {
+        let custom_config = ZbmathSourceConfig {
             base_url: "https://custom.example.com/".to_string(),
             delay_between_pages_ms: 100,
         };
@@ -1386,13 +1374,13 @@ mod tests {
         assert_eq!(records.len(), 1);
     }
 
-    /// Test ZbmathConfig debug trait
+    /// Test ZbmathSourceConfig debug trait
     #[test]
     fn test_zbmath_config_debug() {
-        let config = ZbmathConfig::default();
+        let config = ZbmathSourceConfig::default();
         let debug_str = format!("{:?}", config);
         assert!(debug_str.contains("https://oai.zbmath.org/v1/"));
-        assert!(debug_str.contains("500"));
+        assert!(debug_str.contains("100"));
     }
 
     /// Test scrape_chunk with records that have all optional fields missing

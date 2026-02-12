@@ -9,7 +9,6 @@ use std::sync::Arc;
 #[coverage(off)]
 #[allow(clippy::field_reassign_with_default)]
 pub fn init_datastore(path: &Path) -> Result<Arc<HelixGraphEngine>, Box<dyn std::error::Error>> {
-    // Configure secondary indices
     let indices = vec![
         SecondaryIndex::Index("year".to_string()),
         SecondaryIndex::Index("title".to_string()),
@@ -25,7 +24,6 @@ pub fn init_datastore(path: &Path) -> Result<Arc<HelixGraphEngine>, Box<dyn std:
     opts.config.graph_config = Some(graph_config);
     opts.version_info = VersionInfo::default();
 
-    // Ensure the directory exists
     if !path.exists() {
         std::fs::create_dir_all(path)?;
     }

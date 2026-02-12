@@ -33,7 +33,15 @@ pub async fn run_full_refresh(
         source_modes.insert("dblp".to_string(), "xml".to_string());
     }
 
-    match orchestrate_scraping_and_ingestion("initial", sources.clone(), Some(source_modes), datastore, &config).await {
+    match orchestrate_scraping_and_ingestion(
+        "initial",
+        sources.clone(),
+        Some(source_modes),
+        datastore,
+        &config,
+    )
+    .await
+    {
         Ok(_) => {
             println!(
                 "Full refresh scrape completed successfully for sources: {:?}",

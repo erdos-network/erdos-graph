@@ -37,6 +37,10 @@ use crate::scrapers::scraper::Scraper;
 use crate::utilities::thread_safe_queue::QueueProducer;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Utc};
+use flate2::read::GzDecoder;
+use quick_xml::Reader;
+use quick_xml::escape::unescape as quick_unescape;
+use quick_xml::events::Event;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -46,10 +50,6 @@ use std::io::BufReader;
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
-use flate2::read::GzDecoder;
-use quick_xml::events::Event;
-use quick_xml::Reader;
-use quick_xml::escape::unescape as quick_unescape;
 
 use crate::config::DblpSourceConfig;
 
@@ -62,13 +62,18 @@ pub enum DblpMode {
     Xml,
 }
 
-impl DblpMode {
+impl std::str::FromStr for DblpMode {
+    type Err = String;
+
     /// Parse mode from string
-    pub fn from_str(s: &str) -> Result<Self, String> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "search" => Ok(DblpMode::Search),
             "xml" => Ok(DblpMode::Xml),
-            _ => Err(format!("Invalid DBLP mode: '{}'. Must be 'search' or 'xml'", s)),
+            _ => Err(format!(
+                "Invalid DBLP mode: '{}'. Must be 'search' or 'xml'",
+                s
+            )),
         }
     }
 }
@@ -136,16 +141,14 @@ impl Scraper for DblpScraper {
     async fn scrape_range_with_mode(
         &self,
         start: DateTime<Utc>,
-        end: DateTime<Utc>,
+        end_date: DateTime<Utc>,
         mode: &str,
         producer: QueueProducer<PublicationRecord>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let dblp_mode = DblpMode::from_str(mode)?;
-        scrape_range_with_mode(start, end, dblp_mode, self.config.clone(), producer).await
+        let dblp_mode: DblpMode = mode.parse()?;
+        scrape_range_with_mode(start, end_date, dblp_mode, self.config.clone(), producer).await
     }
 }
-
-// --- DBLP API Response Structures ---
 
 /// Top-level response structure from the DBLP Search API.
 #[derive(Debug, Deserialize)]
@@ -380,14 +383,13 @@ pub async fn scrape_range_with_config(
                 logger::debug(&format!("Fetching DBLP URL: {}", url));
 
                 let use_cache = config.enable_cache && !is_active_year;
-                let body_text =
-                    match fetch_url_cached(&client, &url, use_cache, &config.cache_dir).await {
-                        Ok(text) => text,
-                        Err(e) => {
-                            logger::error(&format!("Failed to fetch URL {}: {}", url, e));
-                            break;
-                        }
-                    };
+                let body_text = match fetch_url_cached(&client, &url, use_cache, &config).await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        logger::error(&format!("Failed to fetch URL {}: {}", url, e));
+                        break;
+                    }
+                };
 
                 let dblp_resp: DblpResponse = match serde_json::from_str(&body_text) {
                     Ok(v) => v,
@@ -450,44 +452,60 @@ pub async fn scrape_range_with_config(
 async fn fetch_url_cached(
     client: &Client,
     url: &str,
-    enable_cache: bool,
-    cache_dir_str: &str,
+    use_cache: bool,
+    config: &DblpSourceConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    if !enable_cache {
+    let cache_path = if use_cache {
+        let cache_dir = Path::new(&config.cache_dir);
+        if !cache_dir.exists() {
+            fs::create_dir_all(cache_dir)?;
+        }
+
+        let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+        let p = cache_dir.join(format!("{}.json", hash));
+
+        if p.exists() {
+            let content = fs::read_to_string(&p)?;
+            return Ok(content);
+        }
+        Some(p)
+    } else {
+        None
+    };
+
+    let mut attempts = 0;
+
+    loop {
         let resp = client.get(url).send().await?;
+
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            attempts += 1;
+            if attempts > config.max_retries {
+                return Err(
+                    format!("HTTP error: {} (after {} retries)", resp.status(), attempts).into(),
+                );
+            }
+
+            logger::warn(&format!(
+                "Received 429 from DBLP. Pausing for {}ms before retry {}/{}...",
+                config.retry_delay_ms, attempts, config.max_retries
+            ));
+            sleep(Duration::from_millis(config.retry_delay_ms)).await;
+            continue;
+        }
+
         if !resp.status().is_success() {
             return Err(format!("HTTP error: {}", resp.status()).into());
         }
-        return Ok(resp.text().await?);
+
+        let text = resp.text().await?;
+
+        if let Some(path) = &cache_path {
+            fs::write(path, &text)?;
+        }
+
+        return Ok(text);
     }
-
-    let cache_dir = Path::new(cache_dir_str);
-    if !cache_dir.exists() {
-        fs::create_dir_all(cache_dir)?;
-    }
-
-    let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
-    let cache_path = cache_dir.join(format!("{}.json", hash));
-
-    if cache_path.exists() {
-        // println!("Cache hit for URL: {}", url); // Optional logging
-        let content = fs::read_to_string(&cache_path)?;
-        return Ok(content);
-    }
-
-    // println!("Fetching URL: {}", url); // Optional logging
-    let resp = client.get(url).send().await?;
-
-    if !resp.status().is_success() {
-        return Err(format!("HTTP error: {}", resp.status()).into());
-    }
-
-    let text = resp.text().await?;
-
-    // Only cache successful responses
-    fs::write(&cache_path, &text)?;
-
-    Ok(text)
 }
 
 /// Converts a DBLP hit info into a `PublicationRecord`.
@@ -538,8 +556,6 @@ fn convert_hit_to_record(info: DblpInfo) -> Option<PublicationRecord> {
         source: "dblp".to_string(),
     })
 }
-
-// --- XML Dump Scraping Functions ---
 
 /// Scrapes DBLP using XML dump files for a specified date range.
 ///
@@ -595,15 +611,12 @@ pub async fn scrape_range_xml(
     match download_file(&client, &url, &filepath).await {
         Ok(_) => {
             logger::info(&format!("Successfully downloaded: {}", filename));
-            
+
             // Parse the XML file
             logger::info(&format!("Parsing XML file: {}", filename));
             match parse_xml_dump(&filepath, start_date, end_date, &producer) {
                 Ok(count) => {
-                    logger::info(&format!(
-                        "Parsed {} records from {}",
-                        count, filename
-                    ));
+                    logger::info(&format!("Parsed {} records from {}", count, filename));
                 }
                 Err(e) => {
                     logger::error(&format!("Failed to parse {}: {}", filename, e));
@@ -631,15 +644,16 @@ async fn download_file(
     url: &str,
     filepath: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use tokio::io::AsyncWriteExt;
     use futures::StreamExt;
-    
+    use tokio::io::AsyncWriteExt;
+
     // Add timeout to prevent hanging
     let response = tokio::time::timeout(
         Duration::from_secs(300), // 5 minute timeout for large files
-        client.get(url).send()
-    ).await??;
-    
+        client.get(url).send(),
+    )
+    .await??;
+
     if !response.status().is_success() {
         return Err(format!("HTTP error: {}", response.status()).into());
     }
@@ -647,7 +661,10 @@ async fn download_file(
     // Get content length if available
     let total_size = response.content_length();
     if let Some(size) = total_size {
-        logger::debug(&format!("Download size: {:.2} MB", size as f64 / 1_048_576.0));
+        logger::debug(&format!(
+            "Download size: {:.2} MB",
+            size as f64 / 1_048_576.0
+        ));
     }
 
     // Stream the download with progress updates
@@ -656,15 +673,17 @@ async fn download_file(
     let mut downloaded: u64 = 0;
     let mut last_log_time = std::time::Instant::now();
     let mut last_log_bytes = 0u64;
-    
+
     while let Some(chunk_result) = tokio::time::timeout(
         Duration::from_secs(60), // 60 second timeout per chunk
-        stream.next()
-    ).await? {
+        stream.next(),
+    )
+    .await?
+    {
         let chunk = chunk_result?;
         file.write_all(&chunk).await?;
         downloaded += chunk.len() as u64;
-        
+
         // Log progress every 10 seconds or every 100MB
         let elapsed = last_log_time.elapsed();
         if elapsed.as_secs() >= 10 || downloaded - last_log_bytes >= 100_000_000 {
@@ -689,14 +708,14 @@ async fn download_file(
             last_log_bytes = downloaded;
         }
     }
-    
+
     file.flush().await?;
-    
+
     logger::debug(&format!(
         "Download complete: {:.2} MB total",
         downloaded as f64 / 1_048_576.0
     ));
-    
+
     Ok(())
 }
 
@@ -730,7 +749,7 @@ fn parse_xml_dump(
 
     let mut count = 0;
     let mut buf = Vec::new();
-    
+
     // Current publication being parsed
     let mut current_pub: Option<XmlPublication> = None;
     let mut current_text = String::new();
@@ -741,14 +760,15 @@ fn parse_xml_dump(
             Ok(Event::Start(e)) => {
                 let name = e.name();
                 match name.as_ref() {
-                    b"article" | b"inproceedings" | b"proceedings" | b"book" 
-                    | b"incollection" | b"phdthesis" | b"mastersthesis" => {
+                    b"article" | b"inproceedings" | b"proceedings" | b"book" | b"incollection"
+                    | b"phdthesis" | b"mastersthesis" => {
                         // Start of a new publication
-                        let key = e.attributes()
+                        let key = e
+                            .attributes()
                             .filter_map(|a| a.ok())
                             .find(|a| a.key.as_ref() == b"key")
                             .and_then(|a| String::from_utf8(a.value.to_vec()).ok());
-                        
+
                         current_pub = Some(XmlPublication {
                             key: key.unwrap_or_else(|| "unknown".to_string()),
                             title: None,
@@ -777,16 +797,17 @@ fn parse_xml_dump(
             Ok(Event::End(e)) => {
                 let name = e.name();
                 match name.as_ref() {
-                    b"article" | b"inproceedings" | b"proceedings" | b"book" 
-                    | b"incollection" | b"phdthesis" | b"mastersthesis" => {
+                    b"article" | b"inproceedings" | b"proceedings" | b"book" | b"incollection"
+                    | b"phdthesis" | b"mastersthesis" => {
                         // End of publication - convert and submit if valid
-                        if let Some(pub_data) = current_pub.take() {
-                            if let Some(record) = convert_xml_to_record(pub_data, start_date, end_date) {
-                                if let Err(e) = producer.submit(record) {
-                                    logger::error(&format!("Failed to submit record: {}", e));
-                                } else {
-                                    count += 1;
-                                }
+                        if let Some(pub_data) = current_pub.take()
+                            && let Some(record) =
+                                convert_xml_to_record(pub_data, start_date, end_date)
+                        {
+                            if let Err(e) = producer.submit(record) {
+                                logger::error(&format!("Failed to submit record: {}", e));
+                            } else {
+                                count += 1;
                             }
                         }
                     }
@@ -812,10 +833,10 @@ fn parse_xml_dump(
                         current_text.clear();
                     }
                     b"journal" | b"booktitle" => {
-                        if let Some(ref mut pub_data) = current_pub {
-                            if pub_data.venue.is_none() {
-                                pub_data.venue = Some(current_text.trim().to_string());
-                            }
+                        if let Some(ref mut pub_data) = current_pub
+                            && pub_data.venue.is_none()
+                        {
+                            pub_data.venue = Some(current_text.trim().to_string());
                         }
                         current_text.clear();
                     }
@@ -824,7 +845,11 @@ fn parse_xml_dump(
             }
             Ok(Event::Eof) => break,
             Err(e) => {
-                logger::warn(&format!("XML parse error at position {}: {}", reader.buffer_position(), e));
+                logger::warn(&format!(
+                    "XML parse error at position {}: {}",
+                    reader.buffer_position(),
+                    e
+                ));
                 // Continue parsing despite errors
             }
             _ => {}
@@ -857,7 +882,7 @@ fn convert_xml_to_record(
     // Check required fields
     let title = pub_data.title?;
     let year = pub_data.year?;
-    
+
     if title.trim().is_empty() || pub_data.authors.is_empty() {
         return None;
     }
@@ -865,7 +890,7 @@ fn convert_xml_to_record(
     // Filter by date range
     let start_year = start_date.year() as u32;
     let end_year = end_date.year() as u32;
-    
+
     if year < start_year || year > end_year {
         return None;
     }

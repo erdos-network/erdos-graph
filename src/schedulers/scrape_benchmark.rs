@@ -29,9 +29,8 @@ pub async fn run_benchmark(
     mut config: Config,
     datastore: Arc<HelixGraphEngine>,
 ) -> Result<std::time::Duration, Box<dyn std::error::Error>> {
-    // Only use ArXiv for benchmarks since DBLP XML mode downloads the entire dump
-    // regardless of date range, making it unsuitable for benchmarking
-    let sources = vec!["arxiv".to_string()];
+    // Use ArXiv and ZbMath for benchmarks
+    let sources = vec!["arxiv".to_string(), "zbmath".to_string()];
     logger::info(&format!(
         "Starting benchmark scrape for {} weeks on sources: {:?}",
         num_weeks, sources
@@ -45,27 +44,21 @@ pub async fn run_benchmark(
         .unwrap_or("checkpoints");
     let benchmark_checkpoint_dir = std::path::Path::new(base_checkpoint_dir).join("benchmark");
 
-    let base_cache_dir = &config.scrapers.dblp.cache_dir;
-    let benchmark_cache_dir = std::path::Path::new(base_cache_dir).join("benchmark");
-
     // Clean up existing benchmark directories to ensure a fresh run
     if benchmark_checkpoint_dir.exists() {
         std::fs::remove_dir_all(&benchmark_checkpoint_dir)?;
     }
-    // We also clean the cache to benchmark the full scraping process including network requests
-    if benchmark_cache_dir.exists() {
-        std::fs::remove_dir_all(&benchmark_cache_dir)?;
-    }
 
     config.ingestion.checkpoint_dir = Some(benchmark_checkpoint_dir.to_string_lossy().to_string());
-    config.scrapers.dblp.cache_dir = benchmark_cache_dir.to_string_lossy().to_string();
 
     // Override weekly_days in config for the benchmark
     config.ingestion.weekly_days = num_weeks * 7;
 
     let start_time = Instant::now();
 
-    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, datastore, &config).await {
+    match orchestrate_scraping_and_ingestion("weekly", sources.clone(), None, datastore, &config)
+        .await
+    {
         Ok(_) => {
             let duration = start_time.elapsed();
             logger::info(&format!(

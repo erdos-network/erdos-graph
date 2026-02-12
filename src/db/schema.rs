@@ -153,7 +153,5 @@ pub fn coauthored_with_properties() -> HashMap<String, String> {
 /// # Returns
 /// Always returns `Ok(())` for now
 pub fn create_types<T>(_datastore: &mut T) -> Result<(), Box<dyn std::error::Error>> {
-    // IndraDB doesn't require type registration
-    // This function is a no-op but kept for future extensibility
     Ok(())
 }

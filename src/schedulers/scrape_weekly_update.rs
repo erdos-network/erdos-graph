@@ -44,8 +44,14 @@ pub async fn start_weekly_scraper(
                 source_modes.insert("dblp".to_string(), "search".to_string());
             }
 
-            match orchestrate_scraping_and_ingestion("weekly", sources.clone(), Some(source_modes), datastore, &config)
-                .await
+            match orchestrate_scraping_and_ingestion(
+                "weekly",
+                sources.clone(),
+                Some(source_modes),
+                datastore,
+                &config,
+            )
+            .await
             {
                 Ok(_) => println!(
                     "Weekly scrape completed successfully for sources: {:?}",

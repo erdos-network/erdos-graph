@@ -14,7 +14,7 @@ pub trait Scraper: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error>>;
 
     /// Scrape publications with a specific mode (optional, for scrapers that support multiple modes).
-    /// 
+    ///
     /// Default implementation calls `scrape_range` and ignores the mode parameter.
     /// Scrapers that support modes (like DBLP with "search" vs "xml") should override this.
     async fn scrape_range_with_mode(
