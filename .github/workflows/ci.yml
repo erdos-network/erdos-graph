@@ -156,14 +156,12 @@ jobs:
           
       - name: Update erdos-graph submodule
         run: |
-          cd erdos-graph
-          git fetch origin
-          git checkout main
-          git pull origin main
-          cd ..
+          git submodule update --remote --merge erdos-graph
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add erdos-graph
-          git diff-index --quiet HEAD || git commit -m "chore: update erdos-graph submodule to latest"
-          git push
+          if ! git diff-index --quiet HEAD -- erdos-graph; then
+            git add erdos-graph
+            git commit -m "chore: update erdos-graph submodule to latest"
+            git push
+          fi
 
