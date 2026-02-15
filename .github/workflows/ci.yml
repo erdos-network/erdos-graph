@@ -153,7 +153,11 @@ jobs:
           repository: erdos-network/erdos-graph-proofs
           token: ${{ secrets.PAT_TOKEN }}
           submodules: false
-          
+      
+      - name: Configure Git to use HTTPS instead of SSH
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+      
       - name: Update erdos-graph submodule
         run: |
           git submodule update --init --remote --merge erdos-graph
@@ -164,4 +168,3 @@ jobs:
             git commit -m "chore: update erdos-graph submodule to latest"
             git push
           fi
-
