@@ -156,7 +156,7 @@ jobs:
           
       - name: Update erdos-graph submodule
         run: |
-          git submodule update --remote --merge erdos-graph
+          git submodule update --init --remote --merge erdos-graph
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if ! git diff-index --quiet HEAD -- erdos-graph; then
