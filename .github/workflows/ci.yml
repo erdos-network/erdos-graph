@@ -152,7 +152,7 @@ jobs:
         with:
           repository: erdos-network/erdos-graph-proofs
           token: ${{ secrets.PAT_TOKEN }}
-          submodules: true
+          submodules: false
           
       - name: Update erdos-graph submodule
         run: |
@@ -166,3 +166,4 @@ jobs:
           git add erdos-graph
           git diff-index --quiet HEAD || git commit -m "chore: update erdos-graph submodule to latest"
           git push
+
