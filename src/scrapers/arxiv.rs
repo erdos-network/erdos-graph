@@ -237,41 +237,41 @@ fn parse_entry_str(
             Ok(Event::End(ref e)) if e.local_name().as_ref() == b"entry" => {
                 // Use updated date for filtering; fall back to published date.
                 let date_str = cur_updated.as_ref().or(cur_published.as_ref())?;
-                    let date_dt = DateTime::parse_from_rfc3339(date_str).ok()?;
-                    let date_utc = date_dt.with_timezone(&Utc);
+                let date_dt = DateTime::parse_from_rfc3339(date_str).ok()?;
+                let date_utc = date_dt.with_timezone(&Utc);
 
-                    if date_utc < start_date || date_utc >= end_date {
-                        return None;
+                if date_utc < start_date || date_utc >= end_date {
+                    return None;
+                }
+
+                // For the year field, use the published date (not updated)
+                let published_str = cur_published.as_ref()?;
+                let published_dt = DateTime::parse_from_rfc3339(published_str).ok()?;
+                let published_utc = published_dt.with_timezone(&Utc);
+                let year = published_utc.year() as u32;
+
+                // Fallback: if XML parser didn't find primary_category, try substring search
+                // This handles edge cases with malformed XML
+                if cur_primary_cat.is_none()
+                    && let Some(idx) = entry_str.find("primary_category")
+                    && let Some(term_pos) = entry_str[idx..].find("term=\"")
+                {
+                    let start = idx + term_pos + "term=\"".len();
+                    if let Some(endpos) = entry_str[start..].find('"') {
+                        cur_primary_cat = Some(entry_str[start..start + endpos].to_string());
                     }
+                }
 
-                    // For the year field, use the published date (not updated)
-                    let published_str = cur_published.as_ref()?;
-                    let published_dt = DateTime::parse_from_rfc3339(published_str).ok()?;
-                    let published_utc = published_dt.with_timezone(&Utc);
-                    let year = published_utc.year() as u32;
-
-                    // Fallback: if XML parser didn't find primary_category, try substring search
-                    // This handles edge cases with malformed XML
-                    if cur_primary_cat.is_none()
-                        && let Some(idx) = entry_str.find("primary_category")
-                        && let Some(term_pos) = entry_str[idx..].find("term=\"")
-                    {
-                        let start = idx + term_pos + "term=\"".len();
-                        if let Some(endpos) = entry_str[start..].find('"') {
-                            cur_primary_cat = Some(entry_str[start..start + endpos].to_string());
-                        }
-                    }
-
-                    return Some(PublicationRecord {
-                        id: cur_id.take().unwrap_or_default(),
-                        title: cur_title.take().unwrap_or_default(),
-                        authors: std::mem::take(&mut cur_authors),
-                        year,
-                        // Prefer journal reference; fall back to primary
-                        // category when journal_ref is absent.
-                        venue: cur_journal_ref.take().or(cur_primary_cat.take()),
-                        source: String::from("arxiv"),
-                    });
+                return Some(PublicationRecord {
+                    id: cur_id.take().unwrap_or_default(),
+                    title: cur_title.take().unwrap_or_default(),
+                    authors: std::mem::take(&mut cur_authors),
+                    year,
+                    // Prefer journal reference; fall back to primary
+                    // category when journal_ref is absent.
+                    venue: cur_journal_ref.take().or(cur_primary_cat.take()),
+                    source: String::from("arxiv"),
+                });
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
