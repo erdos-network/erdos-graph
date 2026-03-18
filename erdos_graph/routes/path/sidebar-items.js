@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ShortestPathResponse"],"fn":["shortest_path"],"struct":["ShortestPathParams"]};

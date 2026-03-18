@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PersonExistsResponse"],"fn":["person_exists"],"struct":["PersonDetails","PersonExistsParams"]};

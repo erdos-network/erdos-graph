@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["client","ingestion","schema"]};
+window.SIDEBAR_ITEMS = {"mod":["client","ingestion","queries","schema"]};

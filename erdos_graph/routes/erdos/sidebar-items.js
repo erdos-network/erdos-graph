@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["erdos_number"],"struct":["ErdosParams","ErdosResponse"]};
