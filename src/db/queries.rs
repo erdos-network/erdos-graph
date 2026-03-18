@@ -5,7 +5,23 @@
 //! use a lightweight mock defined in `routes::test_utils`.
 
 use async_trait::async_trait;
-use helix_db::helix_engine::traversal_core::HelixGraphEngine;
+use bumpalo::Bump;
+use helix_db::{
+    helix_engine::{
+        storage_core::{HelixGraphStorage, storage_methods::StorageMethods},
+        traversal_core::{
+            HelixGraphEngine,
+            ops::{
+                g::G,
+                source::n_from_id::NFromIdAdapter,
+                util::paths::{PathAlgorithm, ShortestPathAdapter},
+            },
+            traversal_value::TraversalValue,
+        },
+    },
+    protocol::value::Value as HelixValue,
+    utils::items::{Edge, Node},
+};
 use lru::LruCache;
 use serde::Serialize;
 use std::{
@@ -13,6 +29,11 @@ use std::{
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
+
+use crate::db::schema::COAUTHORED_WITH_TYPE;
+use crate::scrapers::cache::normalize_author;
+
+// ─── Public types ─────────────────────────────────────────────────────────────
 
 /// A resolved Person vertex from the graph.
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +61,8 @@ pub struct PathStep {
     pub papers_to_next: Vec<PaperInfo>,
 }
 
+// ─── Trait ────────────────────────────────────────────────────────────────────
+
 /// Abstracts all graph read operations required by the HTTP server.
 ///
 /// Implemented by [`HelixDbQueries`] in production and by `MockGraphQueries`
@@ -65,6 +88,8 @@ pub trait GraphQueries: Send + Sync {
     async fn erdos_path(&self, name: &str) -> Option<Vec<PathStep>>;
 }
 
+// ─── Production implementation ────────────────────────────────────────────────
+
 /// Production [`GraphQueries`] implementation backed by HelixDB (LMDB).
 pub struct HelixDbQueries {
     db: Arc<HelixGraphEngine>,
@@ -89,57 +114,249 @@ impl HelixDbQueries {
         }
     }
 
-    /// Scan the `name` secondary index; return `(normalize_author(name) → node_id, erdos_id)`.
-    fn build_index(_db: &Arc<HelixGraphEngine>) -> (HashMap<String, u128>, Option<u128>) {
-        todo!("build_index: read_txn, prefix_iter over name secondary index, normalize_author, detect is_erdos == 'true'")
+    /// Scan the `name` secondary index to build `normalize_author(name) → node_id`.
+    ///
+    /// Simultaneously fetches each node (until Erdős is found) to detect the
+    /// `is_erdos == "true"` property. Node fetches stop as soon as Erdős is
+    /// located, so the cost is O(k) fetches where k is Erdős's position in the
+    /// index iteration order.
+    fn build_index(db: &Arc<HelixGraphEngine>) -> (HashMap<String, u128>, Option<u128>) {
+        let Ok(txn) = db.storage.graph_env.read_txn() else {
+            return (HashMap::new(), None);
+        };
+        let arena = Bump::new();
+
+        let mut person_index = HashMap::new();
+        let mut erdos_id: Option<u128> = None;
+
+        let Some((name_index_db, _)) = db.storage.secondary_indices.get("name") else {
+            return (HashMap::new(), None);
+        };
+        let Ok(iter) = name_index_db.iter(&txn) else {
+            return (HashMap::new(), None);
+        };
+
+        for (key_bytes, node_id) in iter.flatten() {
+            let Ok(HelixValue::String(name)) = bincode::deserialize(key_bytes) else {
+                continue;
+            };
+            person_index.insert(normalize_author(&name), node_id);
+
+            // Fetch the node to detect Paul Erdős; skip once found.
+            if erdos_id.is_none() {
+                if let Ok(node) = db.storage.get_node(&txn, &node_id, &arena) {
+                    if matches!(
+                        node.get_property("is_erdos"),
+                        Some(HelixValue::String(s)) if s == "true"
+                    ) {
+                        erdos_id = Some(node_id);
+                    }
+                }
+            }
+        }
+
+        (person_index, erdos_id)
     }
 
-    /// BFS shortest path between two node IDs via HelixDB's built-in algorithm.
-    /// Returns an ordered list of `(person_node_id, coauthored_with_edge_id)` pairs;
-    /// the last entry carries a dummy edge id of `0`.
-    fn bfs_shortest_path(&self, _from_id: u128, _to_id: u128) -> Option<Vec<(u128, u128)>> {
-        todo!("bfs_shortest_path: read_txn, G::new().n_from_id().shortest_path_with_algorithm(PathAlgorithm::BFS)")
+    /// Run BFS between two node IDs using HelixDB's built-in shortest-path
+    /// algorithm and assemble the result into [`PathStep`]s.
+    ///
+    /// Intended to be called inside `tokio::task::spawn_blocking` since
+    /// `RoTxn` is `!Send`.
+    fn run_bfs(db: Arc<HelixGraphEngine>, from_id: u128, to_id: u128) -> Option<Vec<PathStep>> {
+        // Declare arena before txn so that arena outlives txn ('arena: 'txn).
+        let arena = Bump::new();
+        let txn = db.storage.graph_env.read_txn().ok()?;
+
+        let result = G::new(&db.storage, &txn, &arena)
+            .n_from_id(&from_id)
+            .shortest_path_with_algorithm(
+                Some(COAUTHORED_WITH_TYPE),
+                None,           // from = iterator item (from_id's node)
+                Some(&to_id),   // to   = fixed destination
+                PathAlgorithm::BFS,
+                |_e, _f, _t| Ok(1.0),
+            )
+            .collect_to_obj()
+            .ok()?;
+
+        if let TraversalValue::Path((nodes, edges)) = result {
+            Some(Self::assemble_steps(&db.storage, &txn, &arena, &nodes, &edges))
+        } else {
+            None
+        }
     }
 
-    /// Convert a raw BFS path into [`PathStep`]s by fetching person and publication details.
-    fn build_path_steps(&self, _path: Vec<(u128, u128)>) -> Vec<PathStep> {
-        todo!("build_path_steps: per node fetch PersonInfo; per edge parse publication_ids JSON and call lookup_publications_by_ids")
+    /// Convert a BFS `(nodes, edges)` result into [`PathStep`]s.
+    ///
+    /// For each node at index `i`:
+    /// - `papers_to_next` comes from `edges[i].publication_ids` (if `i < edges.len()`)
+    /// - The final node always has an empty `papers_to_next`
+    fn assemble_steps(
+        storage: &HelixGraphStorage,
+        txn: &heed3::RoTxn,
+        arena: &Bump,
+        nodes: &[Node],
+        edges: &[Edge],
+    ) -> Vec<PathStep> {
+        nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| {
+                let name = match node.get_property("name") {
+                    Some(HelixValue::String(s)) => s.clone(),
+                    _ => String::new(),
+                };
+
+                let papers_to_next = if i < edges.len() {
+                    match edges[i].get_property("publication_ids") {
+                        Some(HelixValue::String(s)) => {
+                            let ids: Vec<String> =
+                                serde_json::from_str(s).unwrap_or_default();
+                            Self::lookup_pubs(storage, txn, arena, &ids)
+                        }
+                        _ => vec![],
+                    }
+                } else {
+                    vec![]
+                };
+
+                PathStep { name, papers_to_next }
+            })
+            .collect()
     }
 
-    /// Fetch [`PaperInfo`] for each source-specific publication ID string.
-    fn lookup_publications_by_ids(&self, _pub_ids: &[String]) -> Vec<PaperInfo> {
-        todo!("lookup_publications_by_ids: read_txn, n_from_index on publication_id secondary index")
+    /// Fetch [`PaperInfo`] for a list of source-specific publication ID strings
+    /// (e.g. `"arxiv:2001.12345"`) using the `publication_id` secondary index.
+    fn lookup_pubs(
+        storage: &HelixGraphStorage,
+        txn: &heed3::RoTxn,
+        arena: &Bump,
+        pub_ids: &[String],
+    ) -> Vec<PaperInfo> {
+        let Some((pub_index, _)) = storage.secondary_indices.get("publication_id") else {
+            return vec![];
+        };
+
+        pub_ids
+            .iter()
+            .filter_map(|pub_id| {
+                let key = bincode::serialize(&HelixValue::String(pub_id.clone())).ok()?;
+                let node_id = pub_index.get(txn, key.as_slice()).ok()??;
+                let node = storage.get_node(txn, &node_id, arena).ok()?;
+
+                let title = match node.get_property("title") {
+                    Some(HelixValue::String(s)) => s.clone(),
+                    _ => return None,
+                };
+                let year = match node.get_property("year") {
+                    Some(HelixValue::String(s)) => s.clone(),
+                    _ => String::new(),
+                };
+                let venue = match node.get_property("venue") {
+                    Some(HelixValue::String(s)) => s.clone(),
+                    _ => String::new(),
+                };
+
+                Some(PaperInfo {
+                    title,
+                    year,
+                    venue,
+                    publication_id: pub_id.clone(),
+                })
+            })
+            .collect()
     }
 }
 
 #[async_trait]
 impl GraphQueries for HelixDbQueries {
-    async fn lookup_person(&self, _name: &str) -> Option<PersonInfo> {
-        todo!("lookup_person: normalize_author, person_index lookup, fetch node properties")
+    async fn lookup_person(&self, name: &str) -> Option<PersonInfo> {
+        let node_id = *self.person_index.get(&normalize_author(name))?;
+        let db = Arc::clone(&self.db);
+
+        tokio::task::spawn_blocking(move || {
+            let arena = Bump::new();
+            let txn = db.storage.graph_env.read_txn().ok()?;
+            let node = db.storage.get_node(&txn, &node_id, &arena).ok()?;
+
+            let name = match node.get_property("name") {
+                Some(HelixValue::String(s)) => s.clone(),
+                _ => return None,
+            };
+            let erdos_number = match node.get_property("erdos_number") {
+                Some(HelixValue::String(s)) => s.clone(),
+                _ => "None".to_string(),
+            };
+
+            Some(PersonInfo { name, erdos_number })
+        })
+        .await
+        .ok()?
     }
 
     async fn shortest_path(&self, from_name: &str, to_name: &str) -> Option<Vec<PathStep>> {
-        let key = format!(
-            "path:{}|{}",
-            crate::scrapers::cache::normalize_author(from_name),
-            crate::scrapers::cache::normalize_author(to_name)
-        );
+        let from_norm = normalize_author(from_name);
+        let to_norm = normalize_author(to_name);
+        let key = format!("path:{}|{}", from_norm, to_norm);
+
         if let Ok(mut c) = self.cache.lock() {
             if let Some(cached) = c.get(&key) {
                 return Some(cached.clone());
             }
         }
-        todo!("shortest_path: resolve IDs via person_index, spawn_blocking bfs_shortest_path, build_path_steps, populate cache")
+
+        let from_id = *self.person_index.get(&from_norm)?;
+        let to_id = *self.person_index.get(&to_norm)?;
+        let db = Arc::clone(&self.db);
+
+        let result = tokio::task::spawn_blocking(move || Self::run_bfs(db, from_id, to_id))
+            .await
+            .ok()??;
+
+        if let Ok(mut c) = self.cache.lock() {
+            c.put(key, result.clone());
+        }
+
+        Some(result)
     }
 
     async fn erdos_path(&self, name: &str) -> Option<Vec<PathStep>> {
-        let _erdos_id = self.erdos_id?;
-        let key = format!("erdos:{}", crate::scrapers::cache::normalize_author(name));
+        let erdos_id = self.erdos_id?;
+        let norm = normalize_author(name);
+        let key = format!("erdos:{}", norm);
+
         if let Ok(mut c) = self.cache.lock() {
             if let Some(cached) = c.get(&key) {
                 return Some(cached.clone());
             }
         }
-        todo!("erdos_path: resolve name to node ID via person_index, spawn_blocking bfs_shortest_path(id, erdos_id), build_path_steps, populate cache")
+
+        let person_id = *self.person_index.get(&norm)?;
+
+        // If the person IS Erdős, return a single-step path immediately.
+        if person_id == erdos_id {
+            let name_str = self
+                .lookup_person(name)
+                .await
+                .map(|p| p.name)
+                .unwrap_or_else(|| name.to_string());
+            return Some(vec![PathStep {
+                name: name_str,
+                papers_to_next: vec![],
+            }]);
+        }
+
+        let db = Arc::clone(&self.db);
+        let result =
+            tokio::task::spawn_blocking(move || Self::run_bfs(db, person_id, erdos_id))
+                .await
+                .ok()??;
+
+        if let Ok(mut c) = self.cache.lock() {
+            c.put(key, result.clone());
+        }
+
+        Some(result)
     }
 }
