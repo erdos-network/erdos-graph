@@ -5,6 +5,7 @@ use erdos_graph::config::load_config;
 use erdos_graph::db::client::init_datastore;
 use erdos_graph::logger::{self, AsyncLogger, init_logger};
 use erdos_graph::schedulers::{scrape_benchmark, scrape_full_refresh, scrape_weekly_update};
+use erdos_graph::server::start_server;
 use std::path::Path;
 
 #[derive(Parser)]
@@ -34,6 +35,12 @@ enum Commands {
         /// Number of weeks to benchmark
         #[arg(short, long)]
         weeks: u64,
+    },
+    /// Start the HTTP query server
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 8080)]
+        port: u16,
     },
 }
 
@@ -66,6 +73,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Benchmark { weeks } => {
             scrape_benchmark::run_benchmark(weeks, config, datastore).await?;
+        }
+        Commands::Serve { port } => {
+            logger::info(&format!("Starting HTTP server on port {port}..."));
+            start_server(port, datastore).await?;
         }
     }
 

@@ -812,14 +812,12 @@ fn parse_xml_dump(
                             }
                         }
                     }
-                    b"author" => {
-                        if in_author {
-                            if let Some(ref mut pub_data) = current_pub {
-                                pub_data.authors.push(current_text.trim().to_string());
-                            }
-                            in_author = false;
-                            current_text.clear();
+                    b"author" if in_author => {
+                        if let Some(ref mut pub_data) = current_pub {
+                            pub_data.authors.push(current_text.trim().to_string());
                         }
+                        in_author = false;
+                        current_text.clear();
                     }
                     b"title" => {
                         if let Some(ref mut pub_data) = current_pub {

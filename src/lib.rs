@@ -3,8 +3,10 @@
 pub mod config;
 pub mod db;
 pub mod logger;
+pub mod routes;
 pub mod schedulers;
 pub mod scrapers;
+pub mod server;
 pub mod utilities;
 
 #[cfg(test)]
