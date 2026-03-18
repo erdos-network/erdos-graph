@@ -10,6 +10,7 @@
 
 pub mod client;
 pub mod ingestion;
+pub mod queries;
 pub mod schema;
 
 #[cfg(test)]
