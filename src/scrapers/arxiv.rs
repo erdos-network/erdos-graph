@@ -232,14 +232,11 @@ fn parse_entry_str(
                     }
                 }
             }
-            Ok(Event::End(ref e)) => {
-                // On End events, if we've reached the end of an `<entry>`,
-                // build and return a `PublicationRecord` populated from the
-                // fields we've accumulated.
-                if e.local_name().as_ref() == b"entry" {
-                    // Use updated date for filtering (since we query by lastUpdatedDate)
-                    // but fall back to published date if updated is not available
-                    let date_str = cur_updated.as_ref().or(cur_published.as_ref())?;
+            // On End events, build and return a `PublicationRecord` when we've
+            // reached the closing `</entry>` tag.
+            Ok(Event::End(ref e)) if e.local_name().as_ref() == b"entry" => {
+                // Use updated date for filtering; fall back to published date.
+                let date_str = cur_updated.as_ref().or(cur_published.as_ref())?;
                     let date_dt = DateTime::parse_from_rfc3339(date_str).ok()?;
                     let date_utc = date_dt.with_timezone(&Utc);
 
@@ -275,7 +272,6 @@ fn parse_entry_str(
                         venue: cur_journal_ref.take().or(cur_primary_cat.take()),
                         source: String::from("arxiv"),
                     });
-                }
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
