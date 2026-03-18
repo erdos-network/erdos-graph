@@ -28,6 +28,7 @@ pub enum PersonExistsResponse {
     },
 }
 
+/// Serialisable person details embedded in a [`PersonExistsResponse::Found`].
 #[derive(Serialize)]
 pub struct PersonDetails {
     pub name: String,
@@ -35,9 +36,21 @@ pub struct PersonDetails {
 }
 
 /// `GET /person/exists?name={name}`
+///
+/// Normalisation of the name (trim, lowercase, collapse whitespace) is handled
+/// inside [`GraphQueries::lookup_person`].
 pub async fn person_exists(
-    State(_state): State<Arc<AppState>>,
-    Query(_params): Query<PersonExistsParams>,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<PersonExistsParams>,
 ) -> Json<PersonExistsResponse> {
-    todo!("person_exists: normalize name, lookup in person_index, return Found/NotFound")
+    match state.queries.lookup_person(&params.name).await {
+        Some(info) => Json(PersonExistsResponse::Found {
+            exists: true,
+            person: PersonDetails {
+                name: info.name,
+                erdos_number: info.erdos_number,
+            },
+        }),
+        None => Json(PersonExistsResponse::NotFound { exists: false }),
+    }
 }

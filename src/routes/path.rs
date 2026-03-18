@@ -3,8 +3,8 @@
 //! Finds the shortest coauthorship path between two researchers and returns
 //! the full path with each connecting paper's details.
 
-use crate::server::AppState;
 use crate::db::queries::PathStep;
+use crate::server::AppState;
 use axum::{
     Json,
     extract::{Query, State},
@@ -23,6 +23,7 @@ pub struct ShortestPathParams {
 pub enum ShortestPathResponse {
     Found {
         found: bool,
+        /// Number of edges in the path (i.e. `path.len() - 1`).
         distance: usize,
         path: Vec<PathStep>,
     },
@@ -32,9 +33,21 @@ pub enum ShortestPathResponse {
 }
 
 /// `GET /path?from={name1}&to={name2}`
+///
+/// Name normalisation and BFS are delegated to [`GraphQueries::shortest_path`].
 pub async fn shortest_path(
-    State(_state): State<Arc<AppState>>,
-    Query(_params): Query<ShortestPathParams>,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ShortestPathParams>,
 ) -> Json<ShortestPathResponse> {
-    todo!("shortest_path: normalize both names, resolve ids, spawn_blocking BFS, build_path_steps")
+    match state.queries.shortest_path(&params.from, &params.to).await {
+        Some(path) => {
+            let distance = path.len().saturating_sub(1);
+            Json(ShortestPathResponse::Found {
+                found: true,
+                distance,
+                path,
+            })
+        }
+        None => Json(ShortestPathResponse::NotFound { found: false }),
+    }
 }
