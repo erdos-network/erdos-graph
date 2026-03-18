@@ -1,9 +1,14 @@
 #[cfg(test)]
 mod tests {
-    use crate::db::queries::{PathStep, PaperInfo};
+    use crate::db::queries::{PaperInfo, PathStep};
     use crate::routes::path::shortest_path;
     use crate::routes::tests::test_utils::{MockGraphQueries, make_state};
-    use axum::{Router, body::Body, http::{Request, StatusCode}, routing::get};
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+    };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -64,7 +69,12 @@ mod tests {
         assert_eq!(json["path"].as_array().unwrap().len(), 3);
         assert_eq!(json["path"][0]["name"], "Alice");
         assert_eq!(json["path"][2]["name"], "Charlie");
-        assert!(json["path"][2]["papers_to_next"].as_array().unwrap().is_empty());
+        assert!(
+            json["path"][2]["papers_to_next"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

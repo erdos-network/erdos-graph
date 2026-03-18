@@ -3,7 +3,12 @@ mod tests {
     use crate::db::queries::{PaperInfo, PathStep};
     use crate::routes::erdos::erdos_number;
     use crate::routes::tests::test_utils::{MockGraphQueries, make_state};
-    use axum::{Router, body::Body, http::{Request, StatusCode}, routing::get};
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+    };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 

@@ -19,13 +19,8 @@ pub struct PersonExistsParams {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum PersonExistsResponse {
-    Found {
-        exists: bool,
-        person: PersonDetails,
-    },
-    NotFound {
-        exists: bool,
-    },
+    Found { exists: bool, person: PersonDetails },
+    NotFound { exists: bool },
 }
 
 /// Serialisable person details embedded in a [`PersonExistsResponse::Found`].

@@ -1,15 +1,15 @@
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use tempfile::TempDir;
     use crate::config::EdgeCacheConfig;
     use crate::db::client::init_datastore;
     use crate::db::queries::{GraphQueries, HelixDbQueries};
     use crate::db::schema::{
-        GraphEdge, GraphVertex, COAUTHORED_WITH_TYPE, PERSON_TYPE, PUBLICATION_TYPE,
+        COAUTHORED_WITH_TYPE, GraphEdge, GraphVertex, PERSON_TYPE, PUBLICATION_TYPE,
     };
     use crate::scrapers::cache::{DeduplicationCache, EdgeCacheSystem};
-    use crate::scrapers::ingestion_utils::{flush_buffer, IngestionContext, WriteOperation};
+    use crate::scrapers::ingestion_utils::{IngestionContext, WriteOperation, flush_buffer};
+    use std::collections::HashMap;
+    use tempfile::TempDir;
 
     /// Seed a small coauthor graph into `engine` for testing.
     ///
@@ -20,11 +20,11 @@ mod tests {
     ///   Loner  (disconnected)
     /// ```
     ///
-    /// Publications (stored as Publication vertices with secondary index on `publication_id`):
-    /// - `arxiv:0001` – co-authored by Alice and Paul Erdős
-    /// - `arxiv:0002` – co-authored by Alice and Bob
-    /// - `arxiv:0003` – co-authored by Bob and Carol
-    fn seed_test_graph(engine: &std::sync::Arc<helix_db::helix_engine::traversal_core::HelixGraphEngine>) {
+    /// Each edge carries a `publication_ids` JSON array linking to a seeded
+    /// Publication vertex (`arxiv:0001` through `arxiv:0003`).
+    fn seed_test_graph(
+        engine: &std::sync::Arc<helix_db::helix_engine::traversal_core::HelixGraphEngine>,
+    ) {
         // Person vertices
         let erdos = GraphVertex::new(PERSON_TYPE)
             .property("name", "Paul Erdős")
@@ -39,8 +39,7 @@ mod tests {
         let carol = GraphVertex::new(PERSON_TYPE)
             .property("name", "Carol")
             .property("erdos_number", "3");
-        let loner = GraphVertex::new(PERSON_TYPE)
-            .property("name", "Loner");
+        let loner = GraphVertex::new(PERSON_TYPE).property("name", "Loner");
 
         // Publication vertices — looked up via the `publication_id` secondary index
         let pub1 = GraphVertex::new(PUBLICATION_TYPE)
@@ -116,8 +115,6 @@ mod tests {
         (dir, queries)
     }
 
-    // ── lookup_person ─────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn test_lookup_person_found() {
         let (_dir, q) = make_queries();
@@ -143,8 +140,6 @@ mod tests {
             .expect("case-insensitive lookup should succeed");
         assert_eq!(info.name, "Alice");
     }
-
-    // ── shortest_path ─────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_shortest_path_direct_coauthors() {
@@ -192,8 +187,6 @@ mod tests {
         assert!(q.shortest_path("Ghost", "Alice").await.is_none());
     }
 
-    // ── erdos_path ────────────────────────────────────────────────────────────
-
     /// Paul Erdős himself has Erdős number 0 — the path contains only him.
     #[tokio::test]
     async fn test_erdos_path_distance_zero() {
@@ -228,10 +221,7 @@ mod tests {
     #[tokio::test]
     async fn test_erdos_path_distance_two() {
         let (_dir, q) = make_queries();
-        let path = q
-            .erdos_path("Bob")
-            .await
-            .expect("Bob has Erdős number 2");
+        let path = q.erdos_path("Bob").await.expect("Bob has Erdős number 2");
         assert_eq!(path.len(), 3, "Bob has Erdős number 2");
         assert_eq!(path[0].name, "Bob");
         assert_eq!(path[2].name, "Paul Erdős");
@@ -250,7 +240,10 @@ mod tests {
     async fn test_erdos_path_result_is_cached() {
         let (_dir, q) = make_queries();
         let path1 = q.erdos_path("Alice").await.expect("first call");
-        let path2 = q.erdos_path("Alice").await.expect("second call (from cache)");
+        let path2 = q
+            .erdos_path("Alice")
+            .await
+            .expect("second call (from cache)");
         assert_eq!(path1.len(), path2.len());
         assert_eq!(path1[0].name, path2[0].name);
         assert_eq!(

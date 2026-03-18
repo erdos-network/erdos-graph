@@ -33,8 +33,6 @@ use std::{
 use crate::db::schema::COAUTHORED_WITH_TYPE;
 use crate::scrapers::cache::normalize_author;
 
-// ─── Public types ─────────────────────────────────────────────────────────────
-
 /// A resolved Person vertex from the graph.
 #[derive(Debug, Clone, Serialize)]
 pub struct PersonInfo {
@@ -61,8 +59,6 @@ pub struct PathStep {
     pub papers_to_next: Vec<PaperInfo>,
 }
 
-// ─── Trait ────────────────────────────────────────────────────────────────────
-
 /// Abstracts all graph read operations required by the HTTP server.
 ///
 /// Implemented by [`HelixDbQueries`] in production and by `MockGraphQueries`
@@ -87,8 +83,6 @@ pub trait GraphQueries: Send + Sync {
     /// Returns `None` if the person is unknown or has no connection to Erdős.
     async fn erdos_path(&self, name: &str) -> Option<Vec<PathStep>>;
 }
-
-// ─── Production implementation ────────────────────────────────────────────────
 
 /// Production [`GraphQueries`] implementation backed by HelixDB (LMDB).
 pub struct HelixDbQueries {
@@ -143,15 +137,14 @@ impl HelixDbQueries {
             person_index.insert(normalize_author(&name), node_id);
 
             // Fetch the node to detect Paul Erdős; skip once found.
-            if erdos_id.is_none() {
-                if let Ok(node) = db.storage.get_node(&txn, &node_id, &arena) {
-                    if matches!(
-                        node.get_property("is_erdos"),
-                        Some(HelixValue::String(s)) if s == "true"
-                    ) {
-                        erdos_id = Some(node_id);
-                    }
-                }
+            if erdos_id.is_none()
+                && let Ok(node) = db.storage.get_node(&txn, &node_id, &arena)
+                && matches!(
+                    node.get_property("is_erdos"),
+                    Some(HelixValue::String(s)) if s == "true"
+                )
+            {
+                erdos_id = Some(node_id);
             }
         }
 
@@ -172,8 +165,8 @@ impl HelixDbQueries {
             .n_from_id(&from_id)
             .shortest_path_with_algorithm(
                 Some(COAUTHORED_WITH_TYPE),
-                None,           // from = iterator item (from_id's node)
-                Some(&to_id),   // to   = fixed destination
+                None,
+                Some(&to_id),
                 PathAlgorithm::BFS,
                 |_e, _f, _t| Ok(1.0),
             )
@@ -181,7 +174,13 @@ impl HelixDbQueries {
             .ok()?;
 
         if let TraversalValue::Path((nodes, edges)) = result {
-            Some(Self::assemble_steps(&db.storage, &txn, &arena, &nodes, &edges))
+            Some(Self::assemble_steps(
+                &db.storage,
+                &txn,
+                &arena,
+                &nodes,
+                &edges,
+            ))
         } else {
             None
         }
@@ -189,9 +188,8 @@ impl HelixDbQueries {
 
     /// Convert a BFS `(nodes, edges)` result into [`PathStep`]s.
     ///
-    /// For each node at index `i`:
-    /// - `papers_to_next` comes from `edges[i].publication_ids` (if `i < edges.len()`)
-    /// - The final node always has an empty `papers_to_next`
+    /// `papers_to_next` for node `i` is populated from `edges[i].publication_ids`;
+    /// the final node always receives an empty `papers_to_next`.
     fn assemble_steps(
         storage: &HelixGraphStorage,
         txn: &heed3::RoTxn,
@@ -211,8 +209,7 @@ impl HelixDbQueries {
                 let papers_to_next = if i < edges.len() {
                     match edges[i].get_property("publication_ids") {
                         Some(HelixValue::String(s)) => {
-                            let ids: Vec<String> =
-                                serde_json::from_str(s).unwrap_or_default();
+                            let ids: Vec<String> = serde_json::from_str(s).unwrap_or_default();
                             Self::lookup_pubs(storage, txn, arena, &ids)
                         }
                         _ => vec![],
@@ -221,7 +218,10 @@ impl HelixDbQueries {
                     vec![]
                 };
 
-                PathStep { name, papers_to_next }
+                PathStep {
+                    name,
+                    papers_to_next,
+                }
             })
             .collect()
     }
@@ -300,10 +300,10 @@ impl GraphQueries for HelixDbQueries {
         let to_norm = normalize_author(to_name);
         let key = format!("path:{}|{}", from_norm, to_norm);
 
-        if let Ok(mut c) = self.cache.lock() {
-            if let Some(cached) = c.get(&key) {
-                return Some(cached.clone());
-            }
+        if let Ok(mut c) = self.cache.lock()
+            && let Some(cached) = c.get(&key)
+        {
+            return Some(cached.clone());
         }
 
         let from_id = *self.person_index.get(&from_norm)?;
@@ -326,10 +326,10 @@ impl GraphQueries for HelixDbQueries {
         let norm = normalize_author(name);
         let key = format!("erdos:{}", norm);
 
-        if let Ok(mut c) = self.cache.lock() {
-            if let Some(cached) = c.get(&key) {
-                return Some(cached.clone());
-            }
+        if let Ok(mut c) = self.cache.lock()
+            && let Some(cached) = c.get(&key)
+        {
+            return Some(cached.clone());
         }
 
         let person_id = *self.person_index.get(&norm)?;
@@ -348,10 +348,9 @@ impl GraphQueries for HelixDbQueries {
         }
 
         let db = Arc::clone(&self.db);
-        let result =
-            tokio::task::spawn_blocking(move || Self::run_bfs(db, person_id, erdos_id))
-                .await
-                .ok()??;
+        let result = tokio::task::spawn_blocking(move || Self::run_bfs(db, person_id, erdos_id))
+            .await
+            .ok()??;
 
         if let Ok(mut c) = self.cache.lock() {
             c.put(key, result.clone());
